@@ -487,7 +487,7 @@ function correction() {
         return {
           detected: false,
           message:
-            "Bentuk lembar jawaban belum terdeteksi dengan jelas. Posisikan LJK di dalam kotak.",
+            `LJK belum valid. Ratio: ${aspectRatio.toFixed(2)}, Area: ${(areaRatio * 100).toFixed(1)}%`,
         }
       }
 
