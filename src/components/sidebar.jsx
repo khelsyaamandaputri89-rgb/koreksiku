@@ -1,11 +1,13 @@
 function Sidebar() {
   return (
-    <aside className="w-64 min-h-screen bg-white border-r border-gray-200 p-5">
+    <aside className="hidden md:block w-64 min-h-screen bg-white border-r border-gray-200 p-5">
+
       <h1 className="text-2xl font-bold text-gray-800 mb-8">
         KoreksiKu
       </h1>
 
       <nav className="space-y-2">
+
         <a
           href="/dashboard"
           className="block px-4 py-3 rounded-lg hover:bg-gray-100"
@@ -33,7 +35,9 @@ function Sidebar() {
         >
           📊 Riwayat
         </a>
+
       </nav>
+
     </aside>
   )
 }
