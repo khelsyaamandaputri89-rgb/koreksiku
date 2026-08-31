@@ -400,7 +400,7 @@ function correction() {
         edged,
         contours,
         hierarchy,
-        cv.RETR_EXTERNAL,
+        cv.RETR_LIST,
         cv.CHAIN_APPROX_SIMPLE
       )
 
@@ -414,7 +414,7 @@ function correction() {
 
         const area = cv.contourArea(contour)
 
-        if (area < imageArea * 0.25) {
+        if (area < imageArea * 0.10) {
           contour.delete()
           continue
         }
