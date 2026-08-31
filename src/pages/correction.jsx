@@ -431,10 +431,8 @@ function correction() {
           true
         )
 
-        if (
-          approx.rows === 4 &&
-          area > largestArea
-        ) {
+        if (area > largestArea) {
+
           largestArea = area
 
           if (bestContour) {
@@ -481,7 +479,7 @@ function correction() {
         aspectRatio <= 0.95
 
       const validArea =
-        areaRatio >= 0.25
+        areaRatio >= 0.10
 
       if (!validRatio || !validArea) {
         return {
