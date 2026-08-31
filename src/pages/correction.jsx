@@ -455,6 +455,7 @@ function correction() {
 
       // Tidak menemukan bentuk kertas
       if (!bestApprox) {
+        console.log("Tidak menemukan contour 4 sisi")
         return {
           detected: false,
           message:
