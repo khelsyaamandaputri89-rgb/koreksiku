@@ -134,26 +134,21 @@ function AnswerSheet() {
             </p>
 
           </div>
-
-
-          {/* DATA SISWA */}
-          <div className="mt-8 grid grid-cols-2 gap-6">
-
-            <div>
-              <p>
-                Nama:
-                <span className="ml-2 inline-block w-56 border-b border-black" />
-              </p>
+          
+            {/* DATA SISWA */}
+            <div className="mt-8 mx-auto flex w-fit justify-center gap-20">
+            
+            <div className="flex items-center">
+                <span>Nama:</span>
+                <span className="ml-3 inline-block w-56 border-b border-black" />
             </div>
 
-            <div>
-              <p>
-                Kelas:
-                <span className="ml-2 inline-block w-40 border-b border-black" />
-              </p>
+            <div className="flex items-center">
+                <span>Kelas:</span>
+                <span className="ml-3 inline-block w-40 border-b border-black" />
             </div>
 
-          </div>
+            </div>
 
 
           {/* JAWABAN */}
