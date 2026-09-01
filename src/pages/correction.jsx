@@ -539,211 +539,283 @@ function correction() {
   // =========================
 
   const readStudentAnswers = (
-    canvas,
-    totalQuestions
-  ) => {
-    if (!window.cv || !window.cv.Mat) {
-      return {}
-    }
+  canvas,
+  totalQuestions
+) => {
+  if (!window.cv || !window.cv.Mat) {
+    return {}
+  }
 
-    const cv = window.cv
+  const cv = window.cv
 
-    let src = null
-    let gray = null
-    let binary = null
+  let src = null
+  let gray = null
+  let binary = null
 
-    try {
-      src = cv.imread(canvas)
+  try {
+    src = cv.imread(canvas)
 
-      gray = new cv.Mat()
+    gray = new cv.Mat()
 
-      cv.cvtColor(
-        src,
-        gray,
-        cv.COLOR_RGBA2GRAY
-      )
+    cv.cvtColor(
+      src,
+      gray,
+      cv.COLOR_RGBA2GRAY
+    )
 
-      binary = new cv.Mat()
+    binary = new cv.Mat()
 
-      cv.threshold(
-        gray,
-        binary,
-        0,
-        255,
-        cv.THRESH_BINARY_INV + cv.THRESH_OTSU
-      )
+    cv.threshold(
+      gray,
+      binary,
+      0,
+      255,
+      cv.THRESH_BINARY_INV +
+        cv.THRESH_OTSU
+    )
 
-      const answers = {}
+    const answers = {}
+
+    /*
+      LAYOUT LJK
+
+      Ukuran hasil warp:
+      900 x 1200
+
+      Area jawaban berada
+      di bagian atas kertas.
+    */
+
+    const columns = 2
+
+    const questionsPerColumn =
+      Math.ceil(totalQuestions / columns)
+
+    /*
+      POSISI AREA JAWABAN
+    */
+
+    const startY = 245
+    const endY = 470
+
+    /*
+      KOLOM KIRI DAN KANAN
+    */
+
+    const leftColumnStartX = 170
+    const rightColumnStartX = 490
+
+    /*
+      JARAK ANTAR BARIS
+    */
+
+    const rowHeight =
+      (endY - startY) /
+      questionsPerColumn
+
+    /*
+      JARAK BUBBLE A-E
+    */
+
+    const bubbleSize = 22
+
+    const bubbleGap = 27
+
+    const choices = [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+    ]
+
+    for (
+      let questionIndex = 0;
+      questionIndex < totalQuestions;
+      questionIndex++
+    ) {
+      const questionNumber =
+        questionIndex + 1
+
+      const columnIndex =
+        Math.floor(
+          questionIndex /
+          questionsPerColumn
+        )
+
+      const rowIndex =
+        questionIndex %
+        questionsPerColumn
 
       /*
-        AREA JAWABAN
-
-        Angka ini berdasarkan template LJK
-        yang kita buat.
-
-        Karena LJK sudah diluruskan menjadi
-        900 x 1200, koordinat menjadi stabil.
+        Posisi Y setiap soal
       */
 
-      const startY = 150
-      const endY = 500
-
-      const startX = 150
-      const endX = 780
-
-      const availableHeight =
-        endY - startY
+      const rowY =
+        startY +
+        rowIndex * rowHeight
 
       /*
-        Kita gunakan 2 kolom.
-
-        Contoh 50 soal:
-
-        Kolom kiri 1–25
-        Kolom kanan 26–50
+        Tentukan kolom kiri / kanan
       */
 
-      const columns = 2
+      const columnStartX =
+        columnIndex === 0
+          ? leftColumnStartX
+          : rightColumnStartX
 
-      const questionsPerColumn =
-        Math.ceil(totalQuestions / columns)
+      let highestInk = 0
+      let secondHighestInk = 0
 
-      const columnWidth =
-        (endX - startX) / columns
-
-      const rowHeight =
-        availableHeight / questionsPerColumn
-
-      const choices = [
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-      ]
+      let selectedAnswer = ""
 
       for (
-        let questionIndex = 0;
-        questionIndex < totalQuestions;
-        questionIndex++
+        let choiceIndex = 0;
+        choiceIndex < choices.length;
+        choiceIndex++
       ) {
-        const questionNumber =
-          questionIndex + 1
-
-        const columnIndex =
-          Math.floor(
-            questionIndex / questionsPerColumn
-          )
-
-        const rowIndex =
-          questionIndex % questionsPerColumn
-
-        const rowY =
-          startY + (rowIndex * rowHeight)
-
-        const columnX =
-          startX +
-          (columnIndex * columnWidth)
-
         /*
-          Area jawaban setelah nomor soal.
-
-          Kita sisakan ruang untuk nomor.
+          Posisi bubble
         */
 
-        const answerStartX =
-          columnX + 45
+        const bubbleX =
+          columnStartX +
+          choiceIndex * bubbleGap
 
-        const answerWidth =
-          columnWidth - 50
+        const bubbleY =
+          rowY
 
-        const bubbleWidth =
-          answerWidth / 5
+        /*
+          Ambil bagian TENGAH bubble.
 
-        let selectedAnswer = ""
-        let highestInk = 0
+          Jangan ambil garis lingkaran,
+          karena yang kita cari adalah
+          tinta di dalam bubble.
+        */
 
-        for (
-          let choiceIndex = 0;
-          choiceIndex < 5;
-          choiceIndex++
-        ) {
-          const x =
-            answerStartX +
-            (choiceIndex * bubbleWidth)
+        const padding = 5
 
-          /*
-            Ambil area tengah bubble.
-          */
-
-          const rect = new cv.Rect(
-            Math.max(0, Math.round(x)),
-            Math.max(0, Math.round(rowY)),
-            Math.min(
-              Math.round(bubbleWidth),
-              binary.cols - Math.round(x)
-            ),
-            Math.min(
-              Math.round(rowHeight),
-              binary.rows - Math.round(rowY)
-            )
+        const roiX =
+          Math.round(
+            bubbleX + padding
           )
 
-          if (
-            rect.width <= 0 ||
-            rect.height <= 0
-          ) {
-            continue
-          }
+        const roiY =
+          Math.round(
+            bubbleY + padding
+          )
 
-          const roi =
-            binary.roi(rect)
+        const roiWidth =
+          Math.round(
+            bubbleSize -
+            padding * 2
+          )
 
-          const ink =
-            cv.countNonZero(roi)
+        const roiHeight =
+          Math.round(
+            bubbleSize -
+            padding * 2
+          )
 
-          roi.delete()
+        /*
+          Pastikan tidak keluar gambar
+        */
 
-          if (ink > highestInk) {
-            highestInk = ink
-            selectedAnswer =
-              choices[choiceIndex]
-          }
+        if (
+          roiX < 0 ||
+          roiY < 0 ||
+          roiX + roiWidth >
+            binary.cols ||
+          roiY + roiHeight >
+            binary.rows
+        ) {
+          continue
         }
 
-        /*
-          Threshold.
+        const rect =
+          new cv.Rect(
+            roiX,
+            roiY,
+            roiWidth,
+            roiHeight
+          )
 
-          Kita gunakan persentase dari
-          luas bubble supaya lebih dinamis.
-        */
+        const roi =
+          binary.roi(rect)
 
-        const minimumInk =
-          rowHeight * bubbleWidth * 0.15
+        const ink =
+          cv.countNonZero(roi)
 
-        if (highestInk > minimumInk) {
-          answers[questionNumber] =
-            selectedAnswer
-        } else {
-          answers[questionNumber] = ""
+        roi.delete()
+
+        console.log(
+          `Soal ${questionNumber} - ${choices[choiceIndex]}:`,
+          ink
+        )
+
+        if (ink > highestInk) {
+          secondHighestInk =
+            highestInk
+
+          highestInk = ink
+
+          selectedAnswer =
+            choices[choiceIndex]
+        } else if (
+          ink > secondHighestInk
+        ) {
+          secondHighestInk = ink
         }
       }
 
-      return answers
-    } catch (error) {
-      console.error(
-        "Error membaca jawaban:",
-        error
-      )
+      /*
+        Tentukan apakah benar-benar diisi
+      */
 
-      return {}
-    } finally {
-      if (src) src.delete()
-      if (gray) gray.delete()
-      if (binary) binary.delete()
+      const minimumInk = 15
+
+      /*
+        Kalau dua bubble hampir sama,
+        anggap kosong supaya tidak salah
+        memilih jawaban.
+      */
+
+      const isAmbiguous =
+        secondHighestInk >
+        highestInk * 0.75
+
+      if (
+        highestInk < minimumInk ||
+        isAmbiguous
+      ) {
+        answers[questionNumber] = ""
+      } else {
+        answers[questionNumber] =
+          selectedAnswer
+      }
     }
-  }
 
+    console.log(
+      "HASIL JAWABAN:",
+      answers
+    )
+
+    return answers
+
+  } catch (error) {
+    console.error(
+      "Error membaca jawaban:",
+      error
+    )
+
+    return {}
+
+  } finally {
+    if (src) src.delete()
+    if (gray) gray.delete()
+    if (binary) binary.delete()
+  }
+}
   // =========================
   // SCAN
   // =========================
