@@ -234,7 +234,8 @@ function correction() {
 
   let src = null
   let gray = null
-  let binary = null
+  let blur = null
+  let edges = null
   let contours = null
   let hierarchy = null
 
@@ -249,303 +250,289 @@ function correction() {
       cv.COLOR_RGBA2GRAY
     )
 
-    // Blur supaya noise berkurang
+    blur = new cv.Mat()
+
     cv.GaussianBlur(
       gray,
-      gray,
+      blur,
       new cv.Size(5, 5),
       0
     )
 
-    binary = new cv.Mat()
+    edges = new cv.Mat()
 
-    // Gunakan OTSU agar menyesuaikan pencahayaan
-    cv.threshold(
-      gray,
-      binary,
-      0,
-      255,
-      cv.THRESH_BINARY_INV +
-      cv.THRESH_OTSU
+    cv.Canny(
+      blur,
+      edges,
+      50,
+      150
     )
 
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
 
     cv.findContours(
-      binary,
+      edges,
       contours,
       hierarchy,
       cv.RETR_LIST,
       cv.CHAIN_APPROX_SIMPLE
     )
 
-    const imageArea =
-      canvas.width * canvas.height
-
-    const markers = []
+    let biggestArea = 0
+    let biggestCorners = null
 
     for (let i = 0; i < contours.size(); i++) {
       const contour = contours.get(i)
 
-      const area =
-        cv.contourArea(contour)
+      const area = cv.contourArea(contour)
 
-      const rect =
-        cv.boundingRect(contour)
+      if (area > biggestArea) {
+        const perimeter =
+          cv.arcLength(contour, true)
+
+        const approx = new cv.Mat()
+
+        cv.approxPolyDP(
+          contour,
+          approx,
+          0.02 * perimeter,
+          true
+        )
+
+        if (approx.rows === 4) {
+          biggestArea = area
+
+          const points = []
+
+          for (let j = 0; j < 4; j++) {
+            points.push({
+              x: approx.data32S[j * 2],
+              y: approx.data32S[j * 2 + 1],
+            })
+          }
+
+          biggestCorners = points
+        }
+
+        approx.delete()
+      }
 
       contour.delete()
-
-      // Filter ukuran
-      if (area < imageArea * 0.00001) {
-        continue
-      }
-
-      const ratio =
-        rect.width / rect.height
-
-      // Lebih toleran terhadap marker
-      const isSquare =
-        ratio > 0.5 &&
-        ratio < 1.8
-
-      if (!isSquare) {
-        continue
-      }
-
-      markers.push({
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        area,
-      })
     }
 
-    console.log(
-      "SEMUA MARKER YANG TERDETEKSI:",
-      markers
-    )
-
-    if (markers.length < 4) {
+    if (!biggestCorners) {
       return {
         detected: false,
         message:
-          `Marker tidak lengkap. Ditemukan ${markers.length} marker.`,
+          "Lembar jawaban belum terdeteksi. Pastikan seluruh kertas terlihat.",
       }
     }
 
     /*
-      Cari marker yang paling dekat
-      dengan masing-masing sudut gambar
+      Urutkan 4 sudut kertas
     */
 
-    const corners = {
-      topLeft: null,
-      topRight: null,
-      bottomLeft: null,
-      bottomRight: null,
-    }
+    const points = biggestCorners
 
-    const centerX =
-      canvas.width / 2
+    const topLeft =
+      points.reduce((prev, curr) =>
+        curr.x + curr.y <
+        prev.x + prev.y
+          ? curr
+          : prev
+      )
 
-    const centerY =
-      canvas.height / 2
+    const bottomRight =
+      points.reduce((prev, curr) =>
+        curr.x + curr.y >
+        prev.x + prev.y
+          ? curr
+          : prev
+      )
 
-    markers.forEach((marker) => {
-      const markerCenterX =
-        marker.x + marker.width / 2
+    const topRight =
+      points.reduce((prev, curr) =>
+        curr.x - curr.y >
+        prev.x - prev.y
+          ? curr
+          : prev
+      )
 
-      const markerCenterY =
-        marker.y + marker.height / 2
-
-      if (
-        markerCenterX < centerX &&
-        markerCenterY < centerY
-      ) {
-        if (
-          !corners.topLeft ||
-          marker.x + marker.y <
-            corners.topLeft.x +
-            corners.topLeft.y
-        ) {
-          corners.topLeft = marker
-        }
-      }
-
-      if (
-        markerCenterX > centerX &&
-        markerCenterY < centerY
-      ) {
-        if (
-          !corners.topRight ||
-          marker.x > corners.topRight.x
-        ) {
-          corners.topRight = marker
-        }
-      }
-
-      if (
-        markerCenterX < centerX &&
-        markerCenterY > centerY
-      ) {
-        if (
-          !corners.bottomLeft ||
-          marker.y > corners.bottomLeft.y
-        ) {
-          corners.bottomLeft = marker
-        }
-      }
-
-      if (
-        markerCenterX > centerX &&
-        markerCenterY > centerY
-      ) {
-        if (
-          !corners.bottomRight ||
-          marker.x + marker.y >
-            corners.bottomRight.x +
-            corners.bottomRight.y
-        ) {
-          corners.bottomRight = marker
-        }
-      }
-    })
+    const bottomLeft =
+      points.reduce((prev, curr) =>
+        curr.x - curr.y <
+        prev.x - prev.y
+          ? curr
+          : prev
+      )
 
     console.log(
-      "MARKER SUDUT:",
-      corners
-    )
-
-    if (
-      !corners.topLeft ||
-      !corners.topRight ||
-      !corners.bottomLeft ||
-      !corners.bottomRight
-    ) {
-      return {
-        detected: false,
-        message:
-          "4 marker sudut belum berhasil ditemukan.",
+      "SUDUT LJK:",
+      {
+        topLeft,
+        topRight,
+        bottomLeft,
+        bottomRight,
       }
-    }
+    )
 
     return {
       detected: true,
       message:
-        "LJK berhasil terdeteksi! ✅",
-      markers: corners,
+        "Lembar jawaban berhasil ditemukan! ✅",
+      markers: {
+        topLeft,
+        topRight,
+        bottomLeft,
+        bottomRight,
+      },
     }
 
   } catch (error) {
     console.error(
-      "Error deteksi marker:",
+      "Error deteksi LJK:",
       error
     )
 
     return {
       detected: false,
       message:
-        "Gagal mendeteksi marker.",
+        "Gagal mendeteksi lembar jawaban.",
     }
   } finally {
     if (src) src.delete()
     if (gray) gray.delete()
-    if (binary) binary.delete()
+    if (blur) blur.delete()
+    if (edges) edges.delete()
     if (contours) contours.delete()
     if (hierarchy) hierarchy.delete()
   }
 }
-
   // =========================
   // LURUSKAN FOTO LJK
   // =========================
 
   const warpAnswerSheet = (canvas, markers) => {
-    const cv = window.cv
+  const cv = window.cv
 
-    let src = null
-    let dst = null
-    let srcTri = null
-    let dstTri = null
-    let matrix = null
+  let src = null
+  let dst = null
+  let srcTri = null
+  let dstTri = null
+  let matrix = null
 
-    try {
-      src = cv.imread(canvas)
+  try {
+    src = cv.imread(canvas)
 
-      const width = 900
-      const height = 1200
+    /*
+      Ukuran hasil LJK
+    */
 
-      dst = new cv.Mat()
+    const width = 900
+    const height = 1200
 
-      srcTri = cv.matFromArray(
-        4,
-        1,
-        cv.CV_32FC2,
-        [
-          markers.topLeft.x,
-          markers.topLeft.y,
+    dst = new cv.Mat()
 
-          markers.topRight.x,
-          markers.topRight.y,
+    /*
+      Urutan HARUS:
 
-          markers.bottomRight.x,
-          markers.bottomRight.y,
+      1. kiri atas
+      2. kanan atas
+      3. kanan bawah
+      4. kiri bawah
+    */
 
-          markers.bottomLeft.x,
-          markers.bottomLeft.y,
-        ]
+    srcTri = cv.matFromArray(
+      4,
+      1,
+      cv.CV_32FC2,
+      [
+        markers.topLeft.x,
+        markers.topLeft.y,
+
+        markers.topRight.x,
+        markers.topRight.y,
+
+        markers.bottomRight.x,
+        markers.bottomRight.y,
+
+        markers.bottomLeft.x,
+        markers.bottomLeft.y,
+      ]
+    )
+
+    dstTri = cv.matFromArray(
+      4,
+      1,
+      cv.CV_32FC2,
+      [
+        0,
+        0,
+
+        width - 1,
+        0,
+
+        width - 1,
+        height - 1,
+
+        0,
+        height - 1,
+      ]
+    )
+
+    matrix = cv.getPerspectiveTransform(
+      srcTri,
+      dstTri
+    )
+
+    cv.warpPerspective(
+      src,
+      dst,
+      matrix,
+      new cv.Size(
+        width,
+        height
+      ),
+      cv.INTER_LINEAR,
+      cv.BORDER_CONSTANT,
+      new cv.Scalar(
+        255,
+        255,
+        255,
+        255
       )
+    )
 
-      dstTri = cv.matFromArray(
-        4,
-        1,
-        cv.CV_32FC2,
-        [
-          0,
-          0,
+    const resultCanvas =
+      document.createElement("canvas")
 
-          width,
-          0,
+    resultCanvas.width = width
+    resultCanvas.height = height
 
-          width,
-          height,
+    cv.imshow(
+      resultCanvas,
+      dst
+    )
 
-          0,
-          height,
-        ]
-      )
+    return resultCanvas
 
-      matrix = cv.getPerspectiveTransform(
-        srcTri,
-        dstTri
-      )
+  } catch (error) {
+    console.error(
+      "Error meluruskan LJK:",
+      error
+    )
 
-      cv.warpPerspective(
-        src,
-        dst,
-        matrix,
-        new cv.Size(width, height)
-      )
+    return null
 
-      const resultCanvas =
-        document.createElement("canvas")
-
-      resultCanvas.width = width
-      resultCanvas.height = height
-
-      cv.imshow(resultCanvas, dst)
-
-      return resultCanvas
-    } finally {
-      if (src) src.delete()
-      if (dst) dst.delete()
-      if (srcTri) srcTri.delete()
-      if (dstTri) dstTri.delete()
-      if (matrix) matrix.delete()
-    }
+  } finally {
+    if (src) src.delete()
+    if (dst) dst.delete()
+    if (srcTri) srcTri.delete()
+    if (dstTri) dstTri.delete()
+    if (matrix) matrix.delete()
   }
+}
 
   // =========================
   // BACA JAWABAN DINAMIS
@@ -598,11 +585,11 @@ function correction() {
         900 x 1200, koordinat menjadi stabil.
       */
 
-      const startY = 330
-      const endY = 1080
+      const startY = 150
+      const endY = 500
 
-      const startX = 100
-      const endX = 800
+      const startX = 150
+      const endX = 780
 
       const availableHeight =
         endY - startY
