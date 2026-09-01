@@ -538,7 +538,7 @@ function correction() {
   // BACA JAWABAN DINAMIS
   // =========================
 
- const readStudentAnswers = (
+  const readStudentAnswers = (
   canvas,
   totalQuestions
 ) => {
@@ -563,14 +563,6 @@ function correction() {
       cv.COLOR_RGBA2GRAY
     )
 
-    // Blur sedikit supaya noise berkurang
-    cv.GaussianBlur(
-      gray,
-      gray,
-      new cv.Size(3, 3),
-      0
-    )
-
     binary = new cv.Mat()
 
     cv.threshold(
@@ -584,51 +576,50 @@ function correction() {
 
     const answers = {}
 
-    const width = canvas.width
-    const height = canvas.height
-
     /*
-      =========================
+      LAYOUT LJK
 
-      AREA JAWABAN LJK
+      Ukuran hasil warp:
+      900 x 1200
 
-      Berdasarkan template:
-      - 2 nomor dalam 1 baris
-      - kiri dan kanan
-      - setiap nomor punya A B C D E
-
-      =========================
+      Area jawaban berada
+      di bagian atas kertas.
     */
 
-    // Area vertikal tempat semua bulatan berada
-    const startY = height * 0.34
-    const endY = height * 0.58
+    const columns = 2
 
-    // Area kolom kiri
-    const leftStartX = width * 0.12
-    const leftEndX = width * 0.48
-
-    // Area kolom kanan
-    const rightStartX = width * 0.52
-    const rightEndX = width * 0.88
+    const questionsPerColumn =
+      Math.ceil(totalQuestions / columns)
 
     /*
-      Jumlah soal per kolom.
-
-      Contoh 15 soal:
-
-      Kiri:
-      1 - 8
-
-      Kanan:
-      9 - 15
+      POSISI AREA JAWABAN
     */
 
-    const rows =
-      Math.ceil(totalQuestions / 2)
+    const startY = 245
+    const endY = 470
+
+    /*
+      KOLOM KIRI DAN KANAN
+    */
+
+    const leftColumnStartX = 170
+    const rightColumnStartX = 490
+
+    /*
+      JARAK ANTAR BARIS
+    */
 
     const rowHeight =
-      (endY - startY) / rows
+      (endY - startY) /
+      questionsPerColumn
+
+    /*
+      JARAK BUBBLE A-E
+    */
+
+    const bubbleSize = 22
+
+    const bubbleGap = 27
 
     const choices = [
       "A",
@@ -638,294 +629,180 @@ function correction() {
       "E",
     ]
 
-    /*
-      =========================
+    for (
+      let questionIndex = 0;
+      questionIndex < totalQuestions;
+      questionIndex++
+    ) {
+      const questionNumber =
+        questionIndex + 1
 
-      FUNGSI BACA 1 NOMOR
+      const columnIndex =
+        Math.floor(
+          questionIndex /
+          questionsPerColumn
+        )
 
-      Fungsi ini mengecek
-      SEMUA bulatan A-E.
-
-      =========================
-    */
-
-    const readQuestion = (
-      questionNumber,
-      columnStartX,
-      columnEndX,
-      rowY
-    ) => {
-      if (
-        questionNumber > totalQuestions
-      ) {
-        return
-      }
-
-      const columnWidth =
-        columnEndX - columnStartX
+      const rowIndex =
+        questionIndex %
+        questionsPerColumn
 
       /*
-        Ruang nomor soal di sebelah kiri.
-
-        Bulatan dimulai setelah nomor.
+        Posisi Y setiap soal
       */
 
-      const bubbleStartX =
-        columnStartX +
-        columnWidth * 0.16
+      const rowY =
+        startY +
+        rowIndex * rowHeight
 
-      const bubbleAreaWidth =
-        columnWidth * 0.84
+      /*
+        Tentukan kolom kiri / kanan
+      */
 
-      const bubbleWidth =
-        bubbleAreaWidth / 5
+      const columnStartX =
+        columnIndex === 0
+          ? leftColumnStartX
+          : rightColumnStartX
 
       let highestInk = 0
       let secondHighestInk = 0
+
       let selectedAnswer = ""
 
-      choices.forEach(
-        (choice, index) => {
+      for (
+        let choiceIndex = 0;
+        choiceIndex < choices.length;
+        choiceIndex++
+      ) {
+        /*
+          Posisi bubble
+        */
 
-          /*
-            Posisi masing-masing
-            bulatan A B C D E
-          */
+        const bubbleX =
+          columnStartX +
+          choiceIndex * bubbleGap
 
-          const bubbleX =
-            bubbleStartX +
-            index * bubbleWidth
+        const bubbleY =
+          rowY
 
-          /*
-            Kita ambil bagian TENGAH
-            bulatan saja.
+        /*
+          Ambil bagian TENGAH bubble.
 
-            Ini penting supaya garis
-            lingkaran bubble tidak
-            dianggap sebagai jawaban.
-          */
+          Jangan ambil garis lingkaran,
+          karena yang kita cari adalah
+          tinta di dalam bubble.
+        */
 
-          const roiX =
-            Math.round(
-              bubbleX +
-              bubbleWidth * 0.28
-            )
+        const padding = 5
 
-          const roiY =
-            Math.round(
-              rowY +
-              rowHeight * 0.22
-            )
-
-          const roiWidth =
-            Math.round(
-              bubbleWidth * 0.44
-            )
-
-          const roiHeight =
-            Math.round(
-              rowHeight * 0.56
-            )
-
-          // Pastikan area tidak keluar gambar
-          if (
-            roiX < 0 ||
-            roiY < 0 ||
-            roiX + roiWidth >
-              binary.cols ||
-            roiY + roiHeight >
-              binary.rows
-          ) {
-            return
-          }
-
-          const rect =
-            new cv.Rect(
-              roiX,
-              roiY,
-              roiWidth,
-              roiHeight
-            )
-
-          const roi =
-            binary.roi(rect)
-
-          /*
-            Hitung jumlah pixel hitam.
-
-            Semakin banyak tinta,
-            semakin besar nilainya.
-          */
-
-          const ink =
-            cv.countNonZero(roi)
-
-          roi.delete()
-
-          console.log(
-            `Soal ${questionNumber} - ${choice}:`,
-            ink
+        const roiX =
+          Math.round(
+            bubbleX + padding
           )
 
-          if (ink > highestInk) {
+        const roiY =
+          Math.round(
+            bubbleY + padding
+          )
 
-            secondHighestInk =
-              highestInk
+        const roiWidth =
+          Math.round(
+            bubbleSize -
+            padding * 2
+          )
 
-            highestInk = ink
+        const roiHeight =
+          Math.round(
+            bubbleSize -
+            padding * 2
+          )
 
-            selectedAnswer =
-              choice
+        /*
+          Pastikan tidak keluar gambar
+        */
 
-          } else if (
-            ink > secondHighestInk
-          ) {
-
-            secondHighestInk = ink
-          }
+        if (
+          roiX < 0 ||
+          roiY < 0 ||
+          roiX + roiWidth >
+            binary.cols ||
+          roiY + roiHeight >
+            binary.rows
+        ) {
+          continue
         }
-      )
+
+        const rect =
+          new cv.Rect(
+            roiX,
+            roiY,
+            roiWidth,
+            roiHeight
+          )
+
+        const roi =
+          binary.roi(rect)
+
+        const ink =
+          cv.countNonZero(roi)
+
+        roi.delete()
+
+        console.log(
+          `Soal ${questionNumber} - ${choices[choiceIndex]}:`,
+          ink
+        )
+
+        if (ink > highestInk) {
+          secondHighestInk =
+            highestInk
+
+          highestInk = ink
+
+          selectedAnswer =
+            choices[choiceIndex]
+        } else if (
+          ink > secondHighestInk
+        ) {
+          secondHighestInk = ink
+        }
+      }
 
       /*
-        =========================
-
-        VALIDASI TINTA
-
-        =========================
+        Tentukan apakah benar-benar diisi
       */
 
-      const bubbleArea =
-        (bubbleWidth * 0.44) *
-        (rowHeight * 0.56)
+      const minimumInk = 15
 
       /*
-        Minimal tinta.
-
-        Kalau tidak ada tinta yang
-        cukup banyak → kosong.
+        Kalau dua bubble hampir sama,
+        anggap kosong supaya tidak salah
+        memilih jawaban.
       */
 
-      const minimumInk =
-        bubbleArea * 0.12
-
-      /*
-        Kalau 2 bulatan memiliki
-        tinta hampir sama,
-        jangan asal memilih.
-
-        Contoh:
-        A terisi dan B juga terisi.
-      */
-
-      const isDoubleMarked =
+      const isAmbiguous =
         secondHighestInk >
         highestInk * 0.75
 
       if (
-        highestInk < minimumInk
+        highestInk < minimumInk ||
+        isAmbiguous
       ) {
-
         answers[questionNumber] = ""
-
-        console.log(
-          `Soal ${questionNumber}: KOSONG`
-        )
-
-      } else if (isDoubleMarked) {
-
-        answers[questionNumber] = ""
-
-        console.log(
-          `Soal ${questionNumber}: LEBIH DARI SATU BULATAN`
-        )
-
       } else {
-
         answers[questionNumber] =
           selectedAnswer
-
-        console.log(
-          `Soal ${questionNumber}:`,
-          selectedAnswer
-        )
-      }
-    }
-
-    /*
-      =========================
-
-      BACA SETIAP BARIS
-
-      SETIAP BARIS ADA
-      2 NOMOR
-
-      =========================
-    */
-
-    for (
-      let row = 0;
-      row < rows;
-      row++
-    ) {
-
-      const rowY =
-        startY +
-        row * rowHeight
-
-      /*
-        NOMOR KIRI
-
-        Baris 1 → soal 1
-        Baris 2 → soal 2
-        dst
-      */
-
-      const leftQuestion =
-        row + 1
-
-      /*
-        NOMOR KANAN
-
-        Kalau 15 soal dan 8 baris:
-
-        Kanan:
-        9, 10, 11, 12, 13, 14, 15
-      */
-
-      const rightQuestion =
-        row + rows + 1
-
-      // BACA NOMOR KIRI
-      readQuestion(
-        leftQuestion,
-        leftStartX,
-        leftEndX,
-        rowY
-      )
-
-      // BACA NOMOR KANAN
-      if (
-        rightQuestion <= totalQuestions
-      ) {
-
-        readQuestion(
-          rightQuestion,
-          rightStartX,
-          rightEndX,
-          rowY
-        )
       }
     }
 
     console.log(
-      "SEMUA JAWABAN TERBACA:",
+      "HASIL JAWABAN:",
       answers
     )
 
     return answers
 
   } catch (error) {
-
     console.error(
       "Error membaca jawaban:",
       error
@@ -934,11 +811,8 @@ function correction() {
     return {}
 
   } finally {
-
     if (src) src.delete()
-
     if (gray) gray.delete()
-
     if (binary) binary.delete()
   }
 }
