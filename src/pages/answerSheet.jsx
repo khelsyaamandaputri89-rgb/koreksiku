@@ -50,10 +50,19 @@ function AnswerSheet() {
     window.print()
   }
 
+  // Membagi soal menjadi 2 kolom
+  // Contoh 10 soal:
+  // Kolom kiri: 1 - 5
+  // Kolom kanan: 6 - 10
+  const middle = Math.ceil(answerKeys.length / 2)
+
+  const leftColumn = answerKeys.slice(0, middle)
+  const rightColumn = answerKeys.slice(middle)
+
   return (
     <div className="min-h-screen bg-gray-100 p-6">
 
-      {/* BAGIAN YANG TIDAK IKUT DIPRINT */}
+      {/* BAGIAN TIDAK IKUT DIPRINT */}
       <div className="mx-auto mb-6 max-w-4xl print:hidden">
 
         <h1 className="text-2xl font-bold text-slate-800">
@@ -68,9 +77,7 @@ function AnswerSheet() {
 
           <select
             value={selectedExam}
-            onChange={(e) =>
-              handleExamChange(e.target.value)
-            }
+            onChange={(e) => handleExamChange(e.target.value)}
             className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3"
           >
             <option value="">
@@ -96,14 +103,14 @@ function AnswerSheet() {
           </button>
 
         </div>
-
       </div>
 
-      {/* LJK */}
+
+      {/* LEMBAR JAWABAN */}
       {selectedExam && (
-        <div
-          className="answer-sheet mx-auto w-full max-w-4xl bg-white p-10 shadow print:max-w-none print:shadow-none"
-        >
+
+        <div className="answer-sheet mx-auto w-full max-w-4xl bg-white p-10 shadow print:max-w-none print:shadow-none">
+
 
           {/* MARKER ATAS */}
           <div className="flex justify-between">
@@ -113,6 +120,7 @@ function AnswerSheet() {
             <div className="h-8 w-8 bg-black" />
 
           </div>
+
 
           {/* HEADER */}
           <div className="mt-6 text-center">
@@ -126,6 +134,7 @@ function AnswerSheet() {
             </p>
 
           </div>
+
 
           {/* DATA SISWA */}
           <div className="mt-8 grid grid-cols-2 gap-6">
@@ -146,38 +155,89 @@ function AnswerSheet() {
 
           </div>
 
+
           {/* JAWABAN */}
-          <div className="mt-10 grid grid-cols-2 gap-x-12 gap-y-3">
+          <div className="mt-10 grid grid-cols-2 gap-x-16">
 
-            {answerKeys.map((item) => (
-              <div
-                key={item.question_number}
-                className="flex items-center gap-3"
-              >
+            {/* KOLOM KIRI */}
+            <div className="space-y-3">
 
-                <span className="w-8 font-semibold">
-                  {item.question_number}.
-                </span>
+              {leftColumn.map((item) => (
 
-                {["A", "B", "C", "D", "E"].map((choice) => (
-                  <div
-                    key={choice}
-                    className="flex items-center gap-1"
-                  >
+                <div
+                  key={item.question_number}
+                  className="flex items-center gap-3"
+                >
 
-                    <div className="h-5 w-5 rounded-full border-2 border-black" />
+                  <span className="w-8 font-semibold">
+                    {item.question_number}.
+                  </span>
 
-                    <span className="text-sm">
-                      {choice}
-                    </span>
 
-                  </div>
-                ))}
+                  {["A", "B", "C", "D", "E"].map((choice) => (
 
-              </div>
-            ))}
+                    <div
+                      key={choice}
+                      className="flex items-center gap-1"
+                    >
+
+                      <div className="h-5 w-5 rounded-full border-2 border-black" />
+
+                      <span className="text-sm">
+                        {choice}
+                      </span>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
+              ))}
+
+            </div>
+
+
+            {/* KOLOM KANAN */}
+            <div className="space-y-3">
+
+              {rightColumn.map((item) => (
+
+                <div
+                  key={item.question_number}
+                  className="flex items-center gap-3"
+                >
+
+                  <span className="w-8 font-semibold">
+                    {item.question_number}.
+                  </span>
+
+
+                  {["A", "B", "C", "D", "E"].map((choice) => (
+
+                    <div
+                      key={choice}
+                      className="flex items-center gap-1"
+                    >
+
+                      <div className="h-5 w-5 rounded-full border-2 border-black" />
+
+                      <span className="text-sm">
+                        {choice}
+                      </span>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
+              ))}
+
+            </div>
 
           </div>
+
 
           {/* MARKER BAWAH */}
           <div className="mt-10 flex justify-between">
@@ -189,6 +249,7 @@ function AnswerSheet() {
           </div>
 
         </div>
+
       )}
 
     </div>
