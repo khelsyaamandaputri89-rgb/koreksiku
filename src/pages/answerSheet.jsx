@@ -157,7 +157,7 @@ function AnswerSheet() {
 
 
           {/* JAWABAN */}
-          <div className="mt-10 grid grid-cols-2 gap-x-16">
+          <div className="mt-10 mx-auto grid w-fit grid-cols-2 gap-x-20">
 
             {/* KOLOM KIRI */}
             <div className="space-y-3">
@@ -166,7 +166,7 @@ function AnswerSheet() {
 
                 <div
                   key={item.question_number}
-                  className="flex items-center gap-3"
+                  className="flex items-center gap-3 whitespace-nowrap"
                 >
 
                   <span className="w-8 font-semibold">
