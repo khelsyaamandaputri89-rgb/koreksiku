@@ -9,6 +9,7 @@ import DashboardLayout from "./layouts/dashboardLayout"
 import Login from "./pages/login"
 import Register from "./pages/register"
 import ProtectedRoute from "./components/protectedRoute"
+import AnswerSheet from "./pages/answerSheet"
 
 function App() {
   return (
@@ -40,6 +41,15 @@ function App() {
             <ProtectedRoute>
               <Dashboard />
             </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/answer-sheet"
+            element={
+              <ProtectedRoute>
+                <AnswerSheet />
+              </ProtectedRoute>
             }
           />
 

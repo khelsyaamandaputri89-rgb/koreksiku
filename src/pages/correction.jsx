@@ -347,7 +347,7 @@ function correction() {
     if (!window.cv || !window.cv.Mat) {
       return {
         detected: false,
-        message: "Mesin pemrosesan gambar belum siap.",
+        message: "OpenCV belum siap.",
       }
     }
 
@@ -355,168 +355,149 @@ function correction() {
 
     let src = null
     let gray = null
-    let blurred = null
-    let edged = null
+    let binary = null
     let contours = null
     let hierarchy = null
-
-    let bestContour = null
-    let bestApprox = null
 
     try {
       src = cv.imread(canvas)
 
       gray = new cv.Mat()
-      blurred = new cv.Mat()
-      edged = new cv.Mat()
 
-      // Ubah ke grayscale
+      // Ubah gambar menjadi grayscale
       cv.cvtColor(
         src,
         gray,
         cv.COLOR_RGBA2GRAY
       )
 
-      // Kurangi noise
-      cv.GaussianBlur(
-        gray,
-        blurred,
-        new cv.Size(5, 5),
-        0
-      )
+      binary = new cv.Mat()
 
-      // Deteksi garis/tepi kertas
-      cv.Canny(
-        blurred,
-        edged,
-        50,
-        150
+      // Cari area hitam
+      cv.threshold(
+        gray,
+        binary,
+        80,
+        255,
+        cv.THRESH_BINARY_INV
       )
 
       contours = new cv.MatVector()
       hierarchy = new cv.Mat()
 
       cv.findContours(
-        edged,
+        binary,
         contours,
         hierarchy,
-        cv.RETR_LIST,
+        cv.RETR_EXTERNAL,
         cv.CHAIN_APPROX_SIMPLE
       )
 
       const imageArea =
         canvas.width * canvas.height
 
-      let largestArea = 0
+      const markers = []
 
       for (let i = 0; i < contours.size(); i++) {
         const contour = contours.get(i)
 
         const area = cv.contourArea(contour)
 
-        if (area < imageArea * 0.10) {
+        // Marker tidak boleh terlalu kecil
+        if (area < imageArea * 0.0001) {
           contour.delete()
           continue
         }
 
-        const perimeter =
-          cv.arcLength(contour, true)
+        const rect = cv.boundingRect(contour)
 
-        const approx = new cv.Mat()
+        const aspectRatio =
+          rect.width / rect.height
 
-        cv.approxPolyDP(
-          contour,
-          approx,
-          0.02 * perimeter,
-          true
-        )
+        /*
+          Marker berbentuk kotak.
+          Jadi rasio width dan height
+          harus mendekati 1.
+        */
+        const isSquare =
+          aspectRatio > 0.7 &&
+          aspectRatio < 1.3
 
-        if (area > largestArea) {
-
-          largestArea = area
-
-          if (bestContour) {
-            bestContour.delete()
-          }
-
-          if (bestApprox) {
-            bestApprox.delete()
-          }
-
-          bestContour = contour
-          bestApprox = approx
-        } else {
-          approx.delete()
-          contour.delete()
+        if (isSquare) {
+          markers.push({
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            area,
+          })
         }
+
+        contour.delete()
       }
 
-      // Tidak menemukan bentuk kertas
-      if (!bestApprox) {
-        console.log("Tidak menemukan contour 4 sisi")
+      console.log("Marker ditemukan:", markers)
+
+      // Harus ada minimal 4 marker
+      if (markers.length < 4) {
         return {
           detected: false,
           message:
-            "Lembar jawaban tidak terdeteksi. Pastikan seluruh kertas terlihat.",
+            `Marker tidak lengkap. Ditemukan ${markers.length} marker.`,
         }
       }
-
-      const rect = cv.boundingRect(bestContour)
-
-      const aspectRatio =
-        rect.width / rect.height
-
-      const areaRatio =
-        largestArea / imageArea
 
       /*
-        LJK kita berbentuk portrait.
-        Rasio kira-kira 0.6 - 0.9.
+        Urutkan marker berdasarkan posisi.
       */
 
-      const validRatio =
-        aspectRatio >= 0.55 &&
-        aspectRatio <= 0.95
+      markers.sort((a, b) => a.y - b.y)
 
-      const validArea =
-        areaRatio >= 0.10
+      const topMarkers =
+        markers.slice(0, 2).sort((a, b) => a.x - b.x)
 
-      if (!validRatio || !validArea) {
-        return {
-          detected: false,
-          message:
-            `LJK belum valid. Ratio: ${aspectRatio.toFixed(2)}, Area: ${(areaRatio * 100).toFixed(1)}%`,
-        }
+      const bottomMarkers =
+        markers
+          .slice(-2)
+          .sort((a, b) => a.x - b.x)
+
+      const orderedMarkers = {
+        topLeft: topMarkers[0],
+        topRight: topMarkers[1],
+        bottomLeft: bottomMarkers[0],
+        bottomRight: bottomMarkers[1],
       }
+
+      console.log(
+        "Marker terurut:",
+        orderedMarkers
+      )
 
       return {
         detected: true,
         message:
-          "Lembar jawaban terdeteksi! ✅",
-        areaRatio,
-        aspectRatio,
+          "LJK berhasil terdeteksi! ✅",
+        markers: orderedMarkers,
       }
 
     } catch (error) {
       console.error(
-        "Deteksi LJK error:",
+        "Error deteksi marker:",
         error
       )
 
       return {
         detected: false,
         message:
-          "Gagal menganalisis gambar.",
+          "Gagal mendeteksi marker.",
       }
+
     } finally {
       if (src) src.delete()
       if (gray) gray.delete()
-      if (blurred) blurred.delete()
-      if (edged) edged.delete()
+      if (binary) binary.delete()
       if (contours) contours.delete()
       if (hierarchy) hierarchy.delete()
-      if (bestContour) bestContour.delete()
-      if (bestApprox) bestApprox.delete()
     }
   }
 
