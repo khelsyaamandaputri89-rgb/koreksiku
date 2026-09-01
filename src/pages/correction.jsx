@@ -7,14 +7,12 @@ function correction() {
 
   const [exams, setExams] = useState([])
   const [selectedExam, setSelectedExam] = useState("")
-
   const [cameraOpen, setCameraOpen] = useState(false)
   const [scanning, setScanning] = useState(false)
-
   const [message, setMessage] = useState("")
   const [preview, setPreview] = useState(null)
 
-  const [scanResult, setScanResult] = useState(null)
+  const [studentAnswers, setStudentAnswers] = useState({})
   const [correctionResult, setCorrectionResult] = useState(null)
 
   useEffect(() => {
@@ -26,13 +24,8 @@ function correction() {
   }, [])
 
   useEffect(() => {
-    if (
-      cameraOpen &&
-      videoRef.current &&
-      streamRef.current
-    ) {
-      videoRef.current.srcObject =
-        streamRef.current
+    if (cameraOpen && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current
     }
   }, [cameraOpen])
 
@@ -44,12 +37,10 @@ function correction() {
     const { data, error } = await supabase
       .from("questions")
       .select("*")
-      .order("created_at", {
-        ascending: false,
-      })
+      .order("created_at", { ascending: false })
 
     if (error) {
-      console.error(error)
+      console.error("Error mengambil ujian:", error)
       return
     }
 
@@ -60,23 +51,15 @@ function correction() {
   // AMBIL KUNCI JAWABAN
   // =========================
 
-  const getAnswerKeys = async () => {
-    if (!selectedExam) return []
-
+  const getAnswerKey = async () => {
     const { data, error } = await supabase
       .from("answer_keys")
       .select("*")
       .eq("question_id", selectedExam)
-      .order("question_number", {
-        ascending: true,
-      })
+      .order("question_number", { ascending: true })
 
     if (error) {
-      console.error(
-        "Error mengambil kunci jawaban:",
-        error
-      )
-
+      console.error("Error mengambil kunci jawaban:", error)
       return []
     }
 
@@ -84,47 +67,93 @@ function correction() {
   }
 
   // =========================
-  // CAMERA
+  // HITUNG HASIL
+  // =========================
+
+  const calculateResult = (studentAnswers, answerKeys) => {
+    let correct = 0
+    let wrong = 0
+    let empty = 0
+
+    const details = []
+
+    answerKeys.forEach((key) => {
+      const studentAnswer =
+        studentAnswers[key.question_number] || ""
+
+      const correctAnswer = key.answer
+
+      let status = ""
+
+      if (!studentAnswer) {
+        empty++
+        status = "empty"
+      } else if (studentAnswer === correctAnswer) {
+        correct++
+        status = "correct"
+      } else {
+        wrong++
+        status = "wrong"
+      }
+
+      details.push({
+        number: key.question_number,
+        studentAnswer,
+        correctAnswer,
+        status,
+      })
+    })
+
+    const total = answerKeys.length
+
+    const score =
+      total > 0
+        ? Math.round((correct / total) * 100)
+        : 0
+
+    return {
+      correct,
+      wrong,
+      empty,
+      total,
+      score,
+      details,
+    }
+  }
+
+  // =========================
+  // KAMERA
   // =========================
 
   const startCamera = async () => {
     try {
       setMessage("")
-      setPreview(null)
-      setCorrectionResult(null)
 
       if (!selectedExam) {
-        setMessage(
-          "Silakan pilih ujian terlebih dahulu."
-        )
+        setMessage("Silakan pilih ujian terlebih dahulu.")
         return
       }
 
-      const stream =
-        await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: {
-              ideal: "environment",
-            },
-            width: {
-              ideal: 1920,
-            },
-            height: {
-              ideal: 1080,
-            },
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: {
+            ideal: "environment",
           },
-          audio: false,
-        })
+          width: {
+            ideal: 1920,
+          },
+          height: {
+            ideal: 1080,
+          },
+        },
+        audio: false,
+      })
 
       streamRef.current = stream
 
       setCameraOpen(true)
-
     } catch (error) {
-      console.error(
-        "Kamera error:",
-        error
-      )
+      console.error("Kamera error:", error)
 
       setMessage(
         "Kamera tidak dapat digunakan. Pastikan izin kamera sudah diberikan."
@@ -151,308 +180,289 @@ function correction() {
 
     setCameraOpen(false)
     setScanning(false)
+
+    setPreview(null)
+    setStudentAnswers({})
+    setCorrectionResult(null)
+    setMessage("")
+  }
+
+  // =========================
+  // URUTKAN MARKER
+  // =========================
+
+  const orderMarkers = (markers) => {
+    const sorted = [...markers].sort(
+      (a, b) => (a.x + a.y) - (b.x + b.y)
+    )
+
+    const topLeft = sorted[0]
+    const bottomRight = sorted[3]
+
+    const remaining = sorted.slice(1, 3)
+
+    let topRight = remaining[0]
+    let bottomLeft = remaining[1]
+
+    if (topRight.y > bottomLeft.y) {
+      const temp = topRight
+      topRight = bottomLeft
+      bottomLeft = temp
+    }
+
+    return {
+      topLeft,
+      topRight,
+      bottomLeft,
+      bottomRight,
+    }
   }
 
   // =========================
   // DETEKSI 4 MARKER
   // =========================
 
-  const detectMarkers = (canvas) => {
-    if (!window.cv) {
-      return {
-        detected: false,
-        message: "OpenCV belum siap.",
-      }
-    }
-
-    const cv = window.cv
-
-    let src = null
-    let gray = null
-    let binary = null
-    let contours = null
-    let hierarchy = null
-
-    try {
-      src = cv.imread(canvas)
-
-      gray = new cv.Mat()
-
-      cv.cvtColor(
-        src,
-        gray,
-        cv.COLOR_RGBA2GRAY
-      )
-
-      cv.GaussianBlur(
-        gray,
-        gray,
-        new cv.Size(5, 5),
-        0
-      )
-
-      binary = new cv.Mat()
-
-      cv.threshold(
-        gray,
-        binary,
-        0,
-        255,
-        cv.THRESH_BINARY_INV +
-          cv.THRESH_OTSU
-      )
-
-      contours = new cv.MatVector()
-      hierarchy = new cv.Mat()
-
-      cv.findContours(
-        binary,
-        contours,
-        hierarchy,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_SIMPLE
-      )
-
-      const imageArea =
-        canvas.width * canvas.height
-
-      const candidates = []
-
-      for (
-        let i = 0;
-        i < contours.size();
-        i++
-      ) {
-        const contour =
-          contours.get(i)
-
-        const area =
-          cv.contourArea(contour)
-
-        const rect =
-          cv.boundingRect(contour)
-
-        contour.delete()
-
-        // Marker terlalu kecil
-        if (
-          area <
-          imageArea * 0.00003
-        ) {
-          continue
-        }
-
-        const ratio =
-          rect.width / rect.height
-
-        // Harus mendekati persegi
-        if (
-          ratio < 0.6 ||
-          ratio > 1.5
-        ) {
-          continue
-        }
-
-        candidates.push({
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          area,
-          centerX:
-            rect.x + rect.width / 2,
-          centerY:
-            rect.y + rect.height / 2,
-        })
-      }
-
-      console.log(
-        "Candidate marker:",
-        candidates
-      )
-
-      if (candidates.length < 4) {
-        return {
-          detected: false,
-          message: `Marker tidak lengkap. Ditemukan ${candidates.length} kandidat.`,
-        }
-      }
-
-      /*
-        Bagi gambar menjadi 4 area.
-
-        Marker harus berada
-        di dekat sudut LJK.
-      */
-
-      const width = canvas.width
-      const height = canvas.height
-
-      const cornerLimitX =
-        width * 0.35
-
-      const cornerLimitY =
-        height * 0.35
-
-      const topLeft =
-        candidates
-          .filter(
-            (m) =>
-              m.centerX <
-                cornerLimitX &&
-              m.centerY <
-                cornerLimitY
-          )
-          .sort(
-            (a, b) =>
-              a.centerX +
-              a.centerY -
-              (b.centerX +
-                b.centerY)
-          )[0]
-
-      const topRight =
-        candidates
-          .filter(
-            (m) =>
-              m.centerX >
-                width - cornerLimitX &&
-              m.centerY <
-                cornerLimitY
-          )
-          .sort(
-            (a, b) =>
-              b.centerX -
-              b.centerX +
-              (a.centerY -
-                b.centerY)
-          )[0]
-
-      const bottomLeft =
-        candidates
-          .filter(
-            (m) =>
-              m.centerX <
-                cornerLimitX &&
-              m.centerY >
-                height - cornerLimitY
-          )
-          .sort(
-            (a, b) =>
-              b.centerY -
-              a.centerY
-          )[0]
-
-      const bottomRight =
-        candidates
-          .filter(
-            (m) =>
-              m.centerX >
-                width - cornerLimitX &&
-              m.centerY >
-                height - cornerLimitY
-          )
-          .sort(
-            (a, b) =>
-              b.centerX +
-              b.centerY -
-              (a.centerX +
-                a.centerY)
-          )[0]
-
-      console.log(
-        "Marker sudut:",
-        {
-          topLeft,
-          topRight,
-          bottomLeft,
-          bottomRight,
-        }
-      )
-
-      if (
-        !topLeft ||
-        !topRight ||
-        !bottomLeft ||
-        !bottomRight
-      ) {
-        return {
-          detected: false,
-          message:
-            "4 marker sudut LJK belum ditemukan dengan benar.",
-        }
-      }
-
-      /*
-        Validasi ukuran marker.
-
-        Jangan sampai marker
-        yang satu sangat besar
-        dibanding lainnya.
-      */
-
-      const markerAreas = [
-        topLeft.area,
-        topRight.area,
-        bottomLeft.area,
-        bottomRight.area,
-      ]
-
-      const minArea =
-        Math.min(...markerAreas)
-
-      const maxArea =
-        Math.max(...markerAreas)
-
-      if (maxArea > minArea * 8) {
-        return {
-          detected: false,
-          message:
-            "Marker yang ditemukan tidak konsisten. Pastikan seluruh LJK terlihat.",
-        }
-      }
-
-      return {
-        detected: true,
-        markers: {
-          topLeft,
-          topRight,
-          bottomLeft,
-          bottomRight,
-        },
-        message:
-          "4 marker LJK berhasil ditemukan.",
-      }
-
-    } catch (error) {
-      console.error(
-        "Error marker:",
-        error
-      )
-
-      return {
-        detected: false,
-        message:
-          "Terjadi kesalahan saat mendeteksi marker.",
-      }
-
-    } finally {
-      if (src) src.delete()
-      if (gray) gray.delete()
-      if (binary) binary.delete()
-      if (contours) contours.delete()
-      if (hierarchy) hierarchy.delete()
+  const detectAnswerSheet = (canvas) => {
+  if (!window.cv || !window.cv.Mat) {
+    return {
+      detected: false,
+      message: "OpenCV belum siap.",
     }
   }
 
+  const cv = window.cv
+
+  let src = null
+  let gray = null
+  let binary = null
+  let contours = null
+  let hierarchy = null
+
+  try {
+    src = cv.imread(canvas)
+
+    gray = new cv.Mat()
+
+    cv.cvtColor(
+      src,
+      gray,
+      cv.COLOR_RGBA2GRAY
+    )
+
+    // Blur supaya noise berkurang
+    cv.GaussianBlur(
+      gray,
+      gray,
+      new cv.Size(5, 5),
+      0
+    )
+
+    binary = new cv.Mat()
+
+    // Gunakan OTSU agar menyesuaikan pencahayaan
+    cv.threshold(
+      gray,
+      binary,
+      0,
+      255,
+      cv.THRESH_BINARY_INV +
+      cv.THRESH_OTSU
+    )
+
+    contours = new cv.MatVector()
+    hierarchy = new cv.Mat()
+
+    cv.findContours(
+      binary,
+      contours,
+      hierarchy,
+      cv.RETR_LIST,
+      cv.CHAIN_APPROX_SIMPLE
+    )
+
+    const imageArea =
+      canvas.width * canvas.height
+
+    const markers = []
+
+    for (let i = 0; i < contours.size(); i++) {
+      const contour = contours.get(i)
+
+      const area =
+        cv.contourArea(contour)
+
+      const rect =
+        cv.boundingRect(contour)
+
+      contour.delete()
+
+      // Filter ukuran
+      if (area < imageArea * 0.00001) {
+        continue
+      }
+
+      const ratio =
+        rect.width / rect.height
+
+      // Lebih toleran terhadap marker
+      const isSquare =
+        ratio > 0.5 &&
+        ratio < 1.8
+
+      if (!isSquare) {
+        continue
+      }
+
+      markers.push({
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        area,
+      })
+    }
+
+    console.log(
+      "SEMUA MARKER YANG TERDETEKSI:",
+      markers
+    )
+
+    if (markers.length < 4) {
+      return {
+        detected: false,
+        message:
+          `Marker tidak lengkap. Ditemukan ${markers.length} marker.`,
+      }
+    }
+
+    /*
+      Cari marker yang paling dekat
+      dengan masing-masing sudut gambar
+    */
+
+    const corners = {
+      topLeft: null,
+      topRight: null,
+      bottomLeft: null,
+      bottomRight: null,
+    }
+
+    const centerX =
+      canvas.width / 2
+
+    const centerY =
+      canvas.height / 2
+
+    markers.forEach((marker) => {
+      const markerCenterX =
+        marker.x + marker.width / 2
+
+      const markerCenterY =
+        marker.y + marker.height / 2
+
+      if (
+        markerCenterX < centerX &&
+        markerCenterY < centerY
+      ) {
+        if (
+          !corners.topLeft ||
+          marker.x + marker.y <
+            corners.topLeft.x +
+            corners.topLeft.y
+        ) {
+          corners.topLeft = marker
+        }
+      }
+
+      if (
+        markerCenterX > centerX &&
+        markerCenterY < centerY
+      ) {
+        if (
+          !corners.topRight ||
+          marker.x > corners.topRight.x
+        ) {
+          corners.topRight = marker
+        }
+      }
+
+      if (
+        markerCenterX < centerX &&
+        markerCenterY > centerY
+      ) {
+        if (
+          !corners.bottomLeft ||
+          marker.y > corners.bottomLeft.y
+        ) {
+          corners.bottomLeft = marker
+        }
+      }
+
+      if (
+        markerCenterX > centerX &&
+        markerCenterY > centerY
+      ) {
+        if (
+          !corners.bottomRight ||
+          marker.x + marker.y >
+            corners.bottomRight.x +
+            corners.bottomRight.y
+        ) {
+          corners.bottomRight = marker
+        }
+      }
+    })
+
+    console.log(
+      "MARKER SUDUT:",
+      corners
+    )
+
+    if (
+      !corners.topLeft ||
+      !corners.topRight ||
+      !corners.bottomLeft ||
+      !corners.bottomRight
+    ) {
+      return {
+        detected: false,
+        message:
+          "4 marker sudut belum berhasil ditemukan.",
+      }
+    }
+
+    return {
+      detected: true,
+      message:
+        "LJK berhasil terdeteksi! ✅",
+      markers: corners,
+    }
+
+  } catch (error) {
+    console.error(
+      "Error deteksi marker:",
+      error
+    )
+
+    return {
+      detected: false,
+      message:
+        "Gagal mendeteksi marker.",
+    }
+  } finally {
+    if (src) src.delete()
+    if (gray) gray.delete()
+    if (binary) binary.delete()
+    if (contours) contours.delete()
+    if (hierarchy) hierarchy.delete()
+  }
+}
+
   // =========================
-  // LURUSKAN LJK
+  // LURUSKAN FOTO LJK
   // =========================
 
-  const warpAnswerSheet = (
-    canvas,
-    markers
-  ) => {
+  const warpAnswerSheet = (canvas, markers) => {
     const cv = window.cv
 
     let src = null
@@ -464,15 +474,8 @@ function correction() {
     try {
       src = cv.imread(canvas)
 
-      /*
-        Ukuran standar LJK.
-
-        Semua foto nanti diubah
-        ke ukuran yang sama.
-      */
-
-      const outputWidth = 1200
-      const outputHeight = 1600
+      const width = 900
+      const height = 1200
 
       dst = new cv.Mat()
 
@@ -481,17 +484,17 @@ function correction() {
         1,
         cv.CV_32FC2,
         [
-          markers.topLeft.centerX,
-          markers.topLeft.centerY,
+          markers.topLeft.x,
+          markers.topLeft.y,
 
-          markers.topRight.centerX,
-          markers.topRight.centerY,
+          markers.topRight.x,
+          markers.topRight.y,
 
-          markers.bottomLeft.centerX,
-          markers.bottomLeft.centerY,
+          markers.bottomRight.x,
+          markers.bottomRight.y,
 
-          markers.bottomRight.centerX,
-          markers.bottomRight.centerY,
+          markers.bottomLeft.x,
+          markers.bottomLeft.y,
         ]
       )
 
@@ -503,65 +506,38 @@ function correction() {
           0,
           0,
 
-          outputWidth,
+          width,
           0,
 
-          0,
-          outputHeight,
+          width,
+          height,
 
-          outputWidth,
-          outputHeight,
+          0,
+          height,
         ]
       )
 
-      matrix =
-        cv.getPerspectiveTransform(
-          srcTri,
-          dstTri
-        )
+      matrix = cv.getPerspectiveTransform(
+        srcTri,
+        dstTri
+      )
 
       cv.warpPerspective(
         src,
         dst,
         matrix,
-        new cv.Size(
-          outputWidth,
-          outputHeight
-        ),
-        cv.INTER_LINEAR,
-        cv.BORDER_CONSTANT,
-        new cv.Scalar(
-          255,
-          255,
-          255,
-          255
-        )
+        new cv.Size(width, height)
       )
 
       const resultCanvas =
         document.createElement("canvas")
 
-      resultCanvas.width =
-        outputWidth
+      resultCanvas.width = width
+      resultCanvas.height = height
 
-      resultCanvas.height =
-        outputHeight
-
-      cv.imshow(
-        resultCanvas,
-        dst
-      )
+      cv.imshow(resultCanvas, dst)
 
       return resultCanvas
-
-    } catch (error) {
-      console.error(
-        "Warp error:",
-        error
-      )
-
-      return null
-
     } finally {
       if (src) src.delete()
       if (dst) dst.delete()
@@ -572,14 +548,14 @@ function correction() {
   }
 
   // =========================
-  // BACA JAWABAN
+  // BACA JAWABAN DINAMIS
   // =========================
 
   const readStudentAnswers = (
     canvas,
     totalQuestions
   ) => {
-    if (!window.cv) {
+    if (!window.cv || !window.cv.Mat) {
       return {}
     }
 
@@ -607,63 +583,49 @@ function correction() {
         binary,
         0,
         255,
-        cv.THRESH_BINARY_INV +
-          cv.THRESH_OTSU
+        cv.THRESH_BINARY_INV + cv.THRESH_OTSU
       )
 
       const answers = {}
 
       /*
-        Layout mengikuti template LJK.
-
-        Untuk:
-        <= 20 soal = 2 kolom
-        <= 40 soal = 3 kolom
-        > 40 soal = 4 kolom
-      */
-
-      let columnCount = 2
-
-      if (totalQuestions > 20) {
-        columnCount = 3
-      }
-
-      if (totalQuestions > 40) {
-        columnCount = 4
-      }
-
-      const rows =
-        Math.ceil(
-          totalQuestions /
-            columnCount
-        )
-
-      /*
         AREA JAWABAN
 
-        Kalau nanti posisi LJK
-        berubah sedikit, bagian ini
-        yang kita sesuaikan.
+        Angka ini berdasarkan template LJK
+        yang kita buat.
+
+        Karena LJK sudah diluruskan menjadi
+        900 x 1200, koordinat menjadi stabil.
       */
 
-      const startX =
-        canvas.width * 0.08
+      const startY = 330
+      const endY = 1080
 
-      const endX =
-        canvas.width * 0.92
+      const startX = 100
+      const endX = 800
 
-      const startY =
-        canvas.height * 0.34
+      const availableHeight =
+        endY - startY
 
-      const endY =
-        canvas.height * 0.82
+      /*
+        Kita gunakan 2 kolom.
+
+        Contoh 50 soal:
+
+        Kolom kiri 1–25
+        Kolom kanan 26–50
+      */
+
+      const columns = 2
+
+      const questionsPerColumn =
+        Math.ceil(totalQuestions / columns)
 
       const columnWidth =
-        (endX - startX) /
-        columnCount
+        (endX - startX) / columns
 
       const rowHeight =
-        (endY - startY) / rows
+        availableHeight / questionsPerColumn
 
       const choices = [
         "A",
@@ -675,191 +637,112 @@ function correction() {
 
       for (
         let questionIndex = 0;
-        questionIndex <
-        totalQuestions;
+        questionIndex < totalQuestions;
         questionIndex++
       ) {
-        /*
-          Nomor soal dibuat
-          urut ke bawah dulu.
+        const questionNumber =
+          questionIndex + 1
 
-          Contoh 15 soal:
-
-          Kolom kiri:
-          1 - 8
-
-          Kolom kanan:
-          9 - 15
-        */
-
-        const column =
+        const columnIndex =
           Math.floor(
-            questionIndex / rows
+            questionIndex / questionsPerColumn
           )
 
-        const row =
-          questionIndex % rows
+        const rowIndex =
+          questionIndex % questionsPerColumn
 
-        const x =
+        const rowY =
+          startY + (rowIndex * rowHeight)
+
+        const columnX =
           startX +
-          column * columnWidth
-
-        const y =
-          startY +
-          row * rowHeight
+          (columnIndex * columnWidth)
 
         /*
-          Area pilihan A-E.
+          Area jawaban setelah nomor soal.
 
-          Nomor soal ada di kiri,
-          lalu bubble berada setelahnya.
+          Kita sisakan ruang untuk nomor.
         */
 
-        const bubbleStartX =
-          x +
-          columnWidth * 0.22
+        const answerStartX =
+          columnX + 45
 
-        const bubbleAreaWidth =
-          columnWidth * 0.72
+        const answerWidth =
+          columnWidth - 50
 
-        let highestInk = 0
-        let secondHighestInk = 0
+        const bubbleWidth =
+          answerWidth / 5
 
         let selectedAnswer = ""
+        let highestInk = 0
 
-        choices.forEach(
-          (choice, index) => {
-            const bubbleX =
-              bubbleStartX +
-              (index *
-                bubbleAreaWidth) /
-                5
-
-            const bubbleY =
-              y +
-              rowHeight * 0.15
-
-            const bubbleWidth =
-              bubbleAreaWidth / 5
-
-            const bubbleHeight =
-              rowHeight * 0.7
-
-            const paddingX =
-              bubbleWidth * 0.25
-
-            const paddingY =
-              bubbleHeight * 0.2
-
-            const roiX =
-              Math.round(
-                bubbleX + paddingX
-              )
-
-            const roiY =
-              Math.round(
-                bubbleY + paddingY
-              )
-
-            const roiWidth =
-              Math.round(
-                bubbleWidth -
-                  paddingX * 2
-              )
-
-            const roiHeight =
-              Math.round(
-                bubbleHeight -
-                  paddingY * 2
-              )
-
-            /*
-              Pastikan ROI
-              tidak keluar gambar.
-            */
-
-            if (
-              roiX < 0 ||
-              roiY < 0 ||
-              roiX + roiWidth >
-                binary.cols ||
-              roiY + roiHeight >
-                binary.rows
-            ) {
-              return
-            }
-
-            const rect =
-              new cv.Rect(
-                roiX,
-                roiY,
-                roiWidth,
-                roiHeight
-              )
-
-            const roi =
-              binary.roi(rect)
-
-            const ink =
-              cv.countNonZero(roi)
-
-            roi.delete()
-
-            if (
-              ink > highestInk
-            ) {
-              secondHighestInk =
-                highestInk
-
-              highestInk = ink
-
-              selectedAnswer =
-                choice
-            } else if (
-              ink > secondHighestInk
-            ) {
-              secondHighestInk = ink
-            }
-          }
-        )
-
-        /*
-          Jika tinta terlalu sedikit,
-          dianggap kosong.
-        */
-
-        const minimumInk = 30
-
-        /*
-          Jika dua pilihan hampir sama,
-          jangan asal memilih jawaban.
-        */
-
-        const isAmbiguous =
-          secondHighestInk >
-          highestInk * 0.75
-
-        if (
-          highestInk < minimumInk ||
-          isAmbiguous
+        for (
+          let choiceIndex = 0;
+          choiceIndex < 5;
+          choiceIndex++
         ) {
-          answers[
-            questionIndex + 1
-          ] = ""
+          const x =
+            answerStartX +
+            (choiceIndex * bubbleWidth)
+
+          /*
+            Ambil area tengah bubble.
+          */
+
+          const rect = new cv.Rect(
+            Math.max(0, Math.round(x)),
+            Math.max(0, Math.round(rowY)),
+            Math.min(
+              Math.round(bubbleWidth),
+              binary.cols - Math.round(x)
+            ),
+            Math.min(
+              Math.round(rowHeight),
+              binary.rows - Math.round(rowY)
+            )
+          )
+
+          if (
+            rect.width <= 0 ||
+            rect.height <= 0
+          ) {
+            continue
+          }
+
+          const roi =
+            binary.roi(rect)
+
+          const ink =
+            cv.countNonZero(roi)
+
+          roi.delete()
+
+          if (ink > highestInk) {
+            highestInk = ink
+            selectedAnswer =
+              choices[choiceIndex]
+          }
+        }
+
+        /*
+          Threshold.
+
+          Kita gunakan persentase dari
+          luas bubble supaya lebih dinamis.
+        */
+
+        const minimumInk =
+          rowHeight * bubbleWidth * 0.15
+
+        if (highestInk > minimumInk) {
+          answers[questionNumber] =
+            selectedAnswer
         } else {
-          answers[
-            questionIndex + 1
-          ] = selectedAnswer
+          answers[questionNumber] = ""
         }
       }
 
-      console.log(
-        "Jawaban terbaca:",
-        answers
-      )
-
       return answers
-
     } catch (error) {
       console.error(
         "Error membaca jawaban:",
@@ -867,81 +750,10 @@ function correction() {
       )
 
       return {}
-
     } finally {
       if (src) src.delete()
       if (gray) gray.delete()
       if (binary) binary.delete()
-    }
-  }
-
-  // =========================
-  // HITUNG NILAI
-  // =========================
-
-  const calculateResult = (
-    studentAnswers,
-    answerKeys
-  ) => {
-    let correct = 0
-    let wrong = 0
-    let empty = 0
-
-    const details = []
-
-    answerKeys.forEach((key) => {
-      const number =
-        key.question_number
-
-      const studentAnswer =
-        studentAnswers[number] || ""
-
-      const correctAnswer =
-        key.answer
-
-      let status = ""
-
-      if (!studentAnswer) {
-        empty++
-        status = "empty"
-
-      } else if (
-        studentAnswer ===
-        correctAnswer
-      ) {
-        correct++
-        status = "correct"
-
-      } else {
-        wrong++
-        status = "wrong"
-      }
-
-      details.push({
-        number,
-        studentAnswer,
-        correctAnswer,
-        status,
-      })
-    })
-
-    const total =
-      answerKeys.length
-
-    const score =
-      total > 0
-        ? Math.round(
-            (correct / total) * 100
-          )
-        : 0
-
-    return {
-      correct,
-      wrong,
-      empty,
-      total,
-      score,
-      details,
     }
   }
 
@@ -958,146 +770,130 @@ function correction() {
     setCorrectionResult(null)
 
     try {
-      const video =
-        videoRef.current
+      // Ambil kunci jawaban terlebih dahulu
+      const answerKeys = await getAnswerKey()
+
+      if (answerKeys.length === 0) {
+        setMessage(
+          "Kunci jawaban untuk ujian ini belum tersedia."
+        )
+
+        setScanning(false)
+        return
+      }
+
+      const video = videoRef.current
 
       if (
         !video.videoWidth ||
         !video.videoHeight
       ) {
         setMessage(
-          "Kamera belum siap."
+          "Kamera belum siap. Tunggu beberapa detik lalu coba lagi."
         )
 
         setScanning(false)
         return
       }
 
-      const originalCanvas =
-        document.createElement(
-          "canvas"
-        )
+      // Ambil foto dari kamera
+      const canvas =
+        document.createElement("canvas")
 
-      originalCanvas.width =
+      canvas.width =
         video.videoWidth
 
-      originalCanvas.height =
+      canvas.height =
         video.videoHeight
 
       const context =
-        originalCanvas.getContext(
-          "2d"
-        )
+        canvas.getContext("2d")
 
       context.drawImage(
         video,
         0,
         0,
-        originalCanvas.width,
-        originalCanvas.height
+        canvas.width,
+        canvas.height
       )
 
       setMessage(
-        "Mencari marker LJK..."
+        "Mendeteksi marker LJK..."
       )
 
-      // 1. DETEKSI MARKER
-
-      const markerResult =
-        detectMarkers(
-          originalCanvas
-        )
+      // Deteksi marker
+      const detection =
+        detectAnswerSheet(canvas)
 
       console.log(
-        "Hasil marker:",
-        markerResult
+        "Hasil deteksi:",
+        detection
       )
 
-      setScanResult(markerResult)
+      if (!detection.detected) {
+        setMessage(detection.message)
 
-      if (!markerResult.detected) {
-        setMessage(
-          markerResult.message
-        )
+        const imageUrl =
+          canvas.toDataURL(
+            "image/jpeg",
+            0.9
+          )
+
+        setPreview(imageUrl)
 
         setScanning(false)
         return
       }
-
-      // 2. LURUSKAN LJK
 
       setMessage(
-        "Meluruskan LJK..."
+        "Meluruskan lembar jawaban..."
       )
 
+      // Luruskan LJK
       const correctedCanvas =
         warpAnswerSheet(
-          originalCanvas,
-          markerResult.markers
+          canvas,
+          detection.markers
         )
 
-      if (!correctedCanvas) {
-        setMessage(
-          "Gagal meluruskan LJK."
-        )
-
-        setScanning(false)
-        return
-      }
-
-      // Tampilkan hasil LJK
-      const correctedImage =
+      // Tampilkan hasil LJK yang sudah lurus
+      const imageUrl =
         correctedCanvas.toDataURL(
           "image/jpeg",
           0.95
         )
 
-      setPreview(
-        correctedImage
-      )
-
-      // 3. AMBIL KUNCI JAWABAN
-
-      setMessage(
-        "Mengambil kunci jawaban..."
-      )
-
-      const answerKeys =
-        await getAnswerKeys()
-
-      if (
-        answerKeys.length === 0
-      ) {
-        setMessage(
-          "Kunci jawaban belum tersedia."
-        )
-
-        setScanning(false)
-        return
-      }
-
-      // 4. BACA JAWABAN
+      setPreview(imageUrl)
 
       setMessage(
         "Membaca jawaban siswa..."
       )
 
-      const studentAnswers =
+      // Baca jawaban sesuai jumlah soal
+      const detectedAnswers =
         readStudentAnswers(
           correctedCanvas,
           answerKeys.length
         )
 
-      // 5. HITUNG HASIL
+      console.log(
+        "Jawaban siswa:",
+        detectedAnswers
+      )
 
-      const result =
+      setStudentAnswers(
+        detectedAnswers
+      )
+
+      // Hitung hasil
+      const resultCorrection =
         calculateResult(
-          studentAnswers,
+          detectedAnswers,
           answerKeys
         )
 
       setCorrectionResult(
-        result
+        resultCorrection
       )
 
       setMessage(
@@ -1124,9 +920,7 @@ function correction() {
       <div className="mx-auto max-w-5xl">
 
         {/* HEADER */}
-
         <div className="mb-6">
-
           <h1 className="text-2xl font-bold text-slate-800 md:text-3xl">
             Koreksi Lembar Jawaban
           </h1>
@@ -1134,66 +928,56 @@ function correction() {
           <p className="mt-2 text-gray-500">
             Pilih ujian kemudian scan lembar jawaban siswa.
           </p>
-
         </div>
 
         {/* PILIH UJIAN */}
-
         <div className="rounded-2xl bg-white p-5 shadow-sm md:p-6">
 
-          <label className="mb-2 block font-semibold">
+          <label className="mb-2 block font-semibold text-slate-700">
             Pilih Ujian
           </label>
 
           <select
             value={selectedExam}
-            onChange={(e) =>
-              setSelectedExam(
-                e.target.value
-              )
-            }
-            className="w-full rounded-xl border border-gray-300 px-4 py-3"
+            onChange={(e) => {
+              setSelectedExam(e.target.value)
+              setCorrectionResult(null)
+              setStudentAnswers({})
+              setMessage("")
+            }}
+            className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-slate-500"
           >
-
             <option value="">
               -- Pilih ujian --
             </option>
 
             {exams.map((exam) => (
-
               <option
                 key={exam.id}
                 value={exam.id}
               >
-                {exam.title ||
-                  exam.name ||
-                  "Ujian"}
+                {exam.title || exam.name || "Ujian"}
               </option>
-
             ))}
-
           </select>
 
         </div>
 
         {/* SCANNER */}
-
         <div className="mt-6 rounded-2xl bg-white p-5 shadow-sm md:p-6">
 
-          <h2 className="text-xl font-bold">
-            Pindai Lembar Jawaban
+          <h2 className="text-xl font-bold text-slate-800">
+            Scan Lembar Jawaban
           </h2>
 
           <p className="mt-1 text-gray-500">
-            Pastikan 4 marker hitam terlihat.
+            Pastikan seluruh LJK dan 4 marker hitam terlihat.
           </p>
 
           <div className="relative mt-5 overflow-hidden rounded-2xl bg-black">
 
             {cameraOpen ? (
-
               <>
-
                 <video
                   ref={videoRef}
                   autoPlay
@@ -1218,41 +1002,50 @@ function correction() {
 
                 </div>
 
+                <div className="absolute left-0 right-0 top-4 text-center">
+
+                  <span className="rounded-full bg-black/60 px-4 py-2 text-sm text-white">
+                    Pastikan 4 marker hitam terlihat
+                  </span>
+
+                </div>
+
               </>
-
             ) : (
-
-              <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
+              <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center">
 
                 <div className="text-6xl">
                   📷
                 </div>
 
-                <h3 className="mt-4 text-xl font-bold">
+                <h3 className="mt-4 text-xl font-bold text-white">
                   Scanner Lembar Jawaban
                 </h3>
+
+                <p className="mt-2 max-w-md text-gray-300">
+                  Kamera akan digunakan untuk memindai
+                  lembar jawaban siswa.
+                </p>
 
                 <button
                   onClick={startCamera}
                   disabled={!selectedExam}
-                  className="mt-6 rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white disabled:opacity-50"
+                  className="mt-6 rounded-xl bg-white px-6 py-3 font-semibold text-slate-800 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   📷 Buka Scanner
                 </button>
 
               </div>
-
             )}
 
           </div>
 
           {cameraOpen && (
-
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
 
               <button
                 onClick={stopCamera}
-                className="rounded-xl border px-6 py-3"
+                className="rounded-xl border border-gray-300 px-6 py-3 font-semibold text-gray-700 hover:bg-gray-50"
               >
                 Batal
               </button>
@@ -1260,128 +1053,100 @@ function correction() {
               <button
                 onClick={handleScan}
                 disabled={scanning}
-                className="flex-1 rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white disabled:opacity-50"
+                className="flex-1 rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
               >
                 {scanning
                   ? "⏳ Memindai..."
-                  : "🔍 Pindai Lembar Jawaban"}
+                  : "🔍 Scan Lembar Jawaban"}
               </button>
 
             </div>
-
           )}
 
           {message && (
-
-            <div className="mt-5 rounded-xl bg-gray-100 p-4 text-center">
-
+            <div className="mt-5 rounded-xl bg-gray-100 p-4 text-center text-sm text-gray-700">
               {message}
-
             </div>
-
           )}
 
-        </div>
+          {/* HASIL KOREKSI */}
 
-        {/* HASIL */}
+          {correctionResult && (
+            <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-6">
 
-        {correctionResult && (
+              <h2 className="text-2xl font-bold text-slate-800">
+                🎉 Hasil Koreksi
+              </h2>
 
-          <div className="mt-6 rounded-2xl bg-white p-6 shadow-sm">
+              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
 
-            <h2 className="text-2xl font-bold">
-              🎉 Hasil Koreksi
-            </h2>
+                <div className="rounded-xl bg-blue-50 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Nilai
+                  </p>
 
-            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
+                  <p className="mt-2 text-4xl font-bold text-blue-600">
+                    {correctionResult.score}
+                  </p>
+                </div>
 
-              <div className="rounded-xl bg-blue-50 p-5 text-center">
+                <div className="rounded-xl bg-green-50 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Benar
+                  </p>
 
-                <p>Nilai</p>
+                  <p className="mt-2 text-4xl font-bold text-green-600">
+                    {correctionResult.correct}
+                  </p>
+                </div>
 
-                <p className="text-4xl font-bold text-blue-600">
-                  {correctionResult.score}
-                </p>
+                <div className="rounded-xl bg-red-50 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Salah
+                  </p>
+
+                  <p className="mt-2 text-4xl font-bold text-red-600">
+                    {correctionResult.wrong}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-gray-100 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Kosong
+                  </p>
+
+                  <p className="mt-2 text-4xl font-bold text-gray-700">
+                    {correctionResult.empty}
+                  </p>
+                </div>
 
               </div>
 
-              <div className="rounded-xl bg-green-50 p-5 text-center">
+              <div className="mt-6 overflow-x-auto">
 
-                <p>Benar</p>
+                <table className="w-full border-collapse">
 
-                <p className="text-4xl font-bold text-green-600">
-                  {correctionResult.correct}
-                </p>
+                  <thead>
+                    <tr className="border-b bg-gray-50 text-left">
+                      <th className="p-3">No</th>
+                      <th className="p-3">Jawaban Siswa</th>
+                      <th className="p-3">Kunci Jawaban</th>
+                      <th className="p-3">Hasil</th>
+                    </tr>
+                  </thead>
 
-              </div>
-
-              <div className="rounded-xl bg-red-50 p-5 text-center">
-
-                <p>Salah</p>
-
-                <p className="text-4xl font-bold text-red-600">
-                  {correctionResult.wrong}
-                </p>
-
-              </div>
-
-              <div className="rounded-xl bg-gray-100 p-5 text-center">
-
-                <p>Kosong</p>
-
-                <p className="text-4xl font-bold">
-                  {correctionResult.empty}
-                </p>
-
-              </div>
-
-            </div>
-
-            <div className="mt-6 overflow-x-auto">
-
-              <table className="w-full border-collapse">
-
-                <thead>
-
-                  <tr className="border-b bg-gray-50">
-
-                    <th className="p-3">
-                      No
-                    </th>
-
-                    <th className="p-3">
-                      Jawaban Siswa
-                    </th>
-
-                    <th className="p-3">
-                      Kunci Jawaban
-                    </th>
-
-                    <th className="p-3">
-                      Hasil
-                    </th>
-
-                  </tr>
-
-                </thead>
-
-                <tbody>
-
-                  {correctionResult.details.map(
-                    (item) => (
-
+                  <tbody>
+                    {correctionResult.details.map((item) => (
                       <tr
                         key={item.number}
-                        className="border-b text-center"
+                        className="border-b"
                       >
-
                         <td className="p-3">
                           {item.number}
                         </td>
 
                         <td className="p-3">
-                          {item.studentAnswer ||
-                            "-"}
+                          {item.studentAnswer || "-"}
                         </td>
 
                         <td className="p-3">
@@ -1389,55 +1154,42 @@ function correction() {
                         </td>
 
                         <td className="p-3">
-
-                          {item.status ===
-                            "correct" &&
-                            "✅ Benar"}
-
-                          {item.status ===
-                            "wrong" &&
-                            "❌ Salah"}
-
-                          {item.status ===
-                            "empty" &&
-                            "⬜ Kosong"}
-
+                          {item.status === "correct" && "✅ Benar"}
+                          {item.status === "wrong" && "❌ Salah"}
+                          {item.status === "empty" && "⬜ Kosong"}
                         </td>
-
                       </tr>
+                    ))}
+                  </tbody>
 
-                    )
-                  )}
+                </table>
 
-                </tbody>
-
-              </table>
+              </div>
 
             </div>
+          )}
 
-          </div>
+          {/* PREVIEW */}
 
-        )}
+          {preview && (
+            <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
 
-        {/* PREVIEW */}
+              <h3 className="mb-3 font-bold text-slate-800">
+                Hasil Scan yang Sudah Diluruskan
+              </h3>
 
-        {preview && (
+              <div className="overflow-hidden rounded-xl bg-gray-100">
+                <img
+                  src={preview}
+                  alt="Hasil scan"
+                  className="max-h-[700px] w-full object-contain"
+                />
+              </div>
 
-          <div className="mt-6 rounded-2xl bg-white p-5 shadow-sm">
+            </div>
+          )}
 
-            <h3 className="mb-3 text-xl font-bold">
-              Hasil Scan yang Sudah Diluruskan
-            </h3>
-
-            <img
-              src={preview}
-              alt="Hasil scan"
-              className="max-h-[700px] w-full object-contain"
-            />
-
-          </div>
-
-        )}
+        </div>
 
       </div>
 
