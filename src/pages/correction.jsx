@@ -744,126 +744,226 @@ const detectAnswerSheet = (canvas) => {
   // =========================
 
   const warpAnswerSheet = (canvas, markers) => {
-    const cv = window.cv
+  const cv = window.cv
 
-    let src = null
-    let dst = null
-    let srcTri = null
-    let dstTri = null
-    let matrix = null
+  let src = null
+  let dst = null
+  let srcTri = null
+  let dstTri = null
+  let matrix = null
 
-    try {
-      src = cv.imread(canvas)
+  try {
+    src = cv.imread(canvas)
 
-      const width = 900
-      const height = 1200
+    const width = 900
+    const height = 1200
 
-      dst = new cv.Mat()
+    dst = new cv.Mat()
 
-      /*
-        Pastikan urutan titik:
+    // ==========================================
+    // AMBIL 4 TITIK MARKER
+    // ==========================================
 
-        kiri atas
-        kanan atas
-        kanan bawah
-        kiri bawah
-      */
+    const points = [
+      {
+        x: markers.topLeft.x,
+        y: markers.topLeft.y,
+      },
+      {
+        x: markers.topRight.x,
+        y: markers.topRight.y,
+      },
+      {
+        x: markers.bottomLeft.x,
+        y: markers.bottomLeft.y,
+      },
+      {
+        x: markers.bottomRight.x,
+        y: markers.bottomRight.y,
+      },
+    ]
 
-      const srcPoints = [
-        markers.topLeft.x,
-        markers.topLeft.y,
+    console.log(
+      "MARKER SEBELUM DIURUTKAN:",
+      points
+    )
 
-        markers.topRight.x,
-        markers.topRight.y,
+    // ==========================================
+    // URUTKAN BERDASARKAN POSISI
+    // ==========================================
 
-        markers.bottomRight.x,
-        markers.bottomRight.y,
+    const sortedByY = [...points].sort(
+      (a, b) => a.y - b.y
+    )
 
-        markers.bottomLeft.x,
-        markers.bottomLeft.y,
-      ]
+    const topPoints =
+      sortedByY.slice(0, 2)
 
-      console.log(
-        "TITIK WARP:",
-        srcPoints
+    const bottomPoints =
+      sortedByY.slice(2, 4)
+
+    // kiri → kanan
+    topPoints.sort(
+      (a, b) => a.x - b.x
+    )
+
+    bottomPoints.sort(
+      (a, b) => a.x - b.x
+    )
+
+    const topLeft = topPoints[0]
+    const topRight = topPoints[1]
+
+    const bottomLeft = bottomPoints[0]
+    const bottomRight = bottomPoints[1]
+
+    console.log(
+      "MARKER SETELAH DIURUTKAN:",
+      {
+        topLeft,
+        topRight,
+        bottomRight,
+        bottomLeft,
+      }
+    )
+
+    // ==========================================
+    // VALIDASI
+    // ==========================================
+
+    if (
+      !topLeft ||
+      !topRight ||
+      !bottomLeft ||
+      !bottomRight
+    ) {
+      console.error(
+        "4 titik marker tidak lengkap"
       )
 
-      srcTri = cv.matFromArray(
-        4,
-        1,
-        cv.CV_32FC2,
-        srcPoints
-      )
+      return null
+    }
 
-      dstTri = cv.matFromArray(
-        4,
-        1,
-        cv.CV_32FC2,
-        [
-          0,
-          0,
+    // ==========================================
+    // TITIK SUMBER
+    // URUTAN WAJIB:
+    // TL → TR → BR → BL
+    // ==========================================
 
-          width - 1,
-          0,
+    const srcPoints = [
+      topLeft.x,
+      topLeft.y,
 
-          width - 1,
-          height - 1,
+      topRight.x,
+      topRight.y,
 
-          0,
-          height - 1,
-        ]
-      )
+      bottomRight.x,
+      bottomRight.y,
 
-      matrix = cv.getPerspectiveTransform(
+      bottomLeft.x,
+      bottomLeft.y,
+    ]
+
+    console.log(
+      "TITIK WARP FINAL:",
+      srcPoints
+    )
+
+    // ==========================================
+    // TITIK TUJUAN
+    // ==========================================
+
+    const dstPoints = [
+      0,
+      0,
+
+      width - 1,
+      0,
+
+      width - 1,
+      height - 1,
+
+      0,
+      height - 1,
+    ]
+
+    srcTri = cv.matFromArray(
+      4,
+      1,
+      cv.CV_32FC2,
+      srcPoints
+    )
+
+    dstTri = cv.matFromArray(
+      4,
+      1,
+      cv.CV_32FC2,
+      dstPoints
+    )
+
+    // ==========================================
+    // PERSPECTIVE TRANSFORM
+    // ==========================================
+
+    matrix =
+      cv.getPerspectiveTransform(
         srcTri,
         dstTri
       )
 
-      cv.warpPerspective(
-        src,
-        dst,
-        matrix,
-        new cv.Size(width, height),
-        cv.INTER_LINEAR,
-        cv.BORDER_CONSTANT,
-        new cv.Scalar(
-          255,
-          255,
-          255,
-          255
-        )
+    cv.warpPerspective(
+      src,
+      dst,
+      matrix,
+      new cv.Size(
+        width,
+        height
+      ),
+      cv.INTER_LINEAR,
+      cv.BORDER_CONSTANT,
+      new cv.Scalar(
+        255,
+        255,
+        255,
+        255
+      )
+    )
+
+    // ==========================================
+    // BUAT CANVAS HASIL
+    // ==========================================
+
+    const resultCanvas =
+      document.createElement(
+        "canvas"
       )
 
-      const resultCanvas =
-        document.createElement("canvas")
+    resultCanvas.width = width
+    resultCanvas.height = height
 
-      resultCanvas.width = width
-      resultCanvas.height = height
+    cv.imshow(
+      resultCanvas,
+      dst
+    )
 
-      cv.imshow(
-        resultCanvas,
-        dst
-      )
+    return resultCanvas
 
-      return resultCanvas
+  } catch (error) {
+    console.error(
+      "Error meluruskan LJK:",
+      error
+    )
 
-    } catch (error) {
-      console.error(
-        "Error meluruskan LJK:",
-        error
-      )
+    return null
 
-      return null
-
-    } finally {
-      if (src) src.delete()
-      if (dst) dst.delete()
-      if (srcTri) srcTri.delete()
-      if (dstTri) dstTri.delete()
-      if (matrix) matrix.delete()
-    }
+  } finally {
+    if (src) src.delete()
+    if (dst) dst.delete()
+    if (srcTri) srcTri.delete()
+    if (dstTri) dstTri.delete()
+    if (matrix) matrix.delete()
   }
-
+}
   // =========================
   // BACA JAWABAN DINAMIS
   // =========================
