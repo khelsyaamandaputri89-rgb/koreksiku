@@ -234,175 +234,115 @@ function correction() {
 
 const detectAnswerSheet = (canvas) => {
   if (!window.cv || !window.cv.Mat) {
-    return {
-      detected: false,
-      message: "OpenCV belum siap.",
-    }
+    return { detected: false, message: "OpenCV belum siap." }
   }
 
   const cv = window.cv
 
   let src = null
   let gray = null
-  let binary = null
+  let blurred = null
+  let edges = null
+  let dilated = null
   let contours = null
   let hierarchy = null
   let kernel = null
+  let bestContour = null
 
   try {
     src = cv.imread(canvas)
-
     const imageWidth = src.cols
     const imageHeight = src.rows
+    const imageArea = imageWidth * imageHeight
 
     // 1. GRAYSCALE
     gray = new cv.Mat()
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
 
-    // 2. THRESHOLD
-    binary = new cv.Mat()
-    cv.threshold(gray, binary, 120, 255, cv.THRESH_BINARY_INV)
+    // 2. BLUR (supaya teks/bubble di dalam kertas
+    //    tidak memecah tepi kertas jadi banyak potongan)
+    blurred = new cv.Mat()
+    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0)
 
-    // 3. MORPHOLOGY
-    kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5))
-    cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel)
+    // 3. DETEKSI TEPI
+    edges = new cv.Mat()
+    cv.Canny(blurred, edges, 50, 150)
 
-    // 4. CARI CONTOUR
+    // 4. SAMBUNGKAN TEPI YANG TERPUTUS
+    kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(7, 7))
+    dilated = new cv.Mat()
+    cv.dilate(edges, dilated, kernel, new cv.Point(-1, -1), 2)
+
+    // 5. CARI CONTOUR
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
     cv.findContours(
-      binary, contours, hierarchy,
+      dilated, contours, hierarchy,
       cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
     )
 
-    const candidates = []
+    // 6. PILIH KONTUR TERBESAR YANG MASUK AKAL
+    //    SEBAGAI KERTAS LJK
+    let bestArea = 0
 
-    // 5. FILTER KANDIDAT
     for (let i = 0; i < contours.size(); i++) {
       const contour = contours.get(i)
       const area = cv.contourArea(contour)
-      const rect = cv.boundingRect(contour)
-      const width = rect.width
-      const height = rect.height
 
-      if (width < 12 || height < 12) { contour.delete(); continue }
-      if (width > imageWidth * 0.25 || height > imageHeight * 0.25) { contour.delete(); continue }
-
-      const ratio = width / height
-      if (ratio < 0.65 || ratio > 1.5) { contour.delete(); continue }
-
-      const rectArea = width * height
-      const rectangularity = area / rectArea
-      if (rectangularity < 0.45) { contour.delete(); continue }
-
-      const perimeter = cv.arcLength(contour, true)
-      const approx = new cv.Mat()
-      cv.approxPolyDP(contour, approx, 0.04 * perimeter, true)
-
-      if (approx.rows >= 4 && approx.rows <= 6) {
-        candidates.push({
-          x: rect.x + rect.width / 2,
-          y: rect.y + rect.height / 2,
-          width, height, area, rectangularity,
-        })
-      }
-
-      approx.delete()
-      contour.delete()
-    }
-
-    console.log("SEMUA KANDIDAT MARKER:", candidates)
-
-    if (candidates.length < 4) {
-      return {
-        detected: false,
-        message: `Marker hitam terdeteksi ${candidates.length}/4. Pastikan keempat marker terlihat jelas.`,
+      // Kertas minimal 20% dari luas foto,
+      // tapi tidak mungkin memenuhi 100% foto
+      if (area > bestArea && area > imageArea * 0.2 && area < imageArea * 0.95) {
+        if (bestContour) bestContour.delete()
+        bestContour = contour
+        bestArea = area
+      } else {
+        contour.delete()
       }
     }
 
-    // =========================================
-    // 6. PILIH 4 MARKER BERDASARKAN POSISI
-    //    RELATIF ANTAR KANDIDAT (BUKAN SUDUT KAMERA)
-    // =========================================
-
-    const centroidX =
-      candidates.reduce((sum, c) => sum + c.x, 0) / candidates.length
-    const centroidY =
-      candidates.reduce((sum, c) => sum + c.y, 0) / candidates.length
-
-    const distFromCentroid = (c) =>
-      Math.sqrt((c.x - centroidX) ** 2 + (c.y - centroidY) ** 2)
-
-    const findExtreme = (predicate) => {
-      let best = null
-      let bestDistance = -1
-
-      candidates.forEach((c, index) => {
-        if (!predicate(c)) return
-
-        const d = distFromCentroid(c)
-
-        if (d > bestDistance) {
-          bestDistance = d
-          best = { ...c, index, distance: d }
-        }
-      })
-
-      return best
-    }
-
-    // Ambil kandidat TERJAUH dari centroid di tiap kuadran
-    // relatif terhadap centroid KANDIDAT ITU SENDIRI
-    const topLeft = findExtreme((c) => c.x < centroidX && c.y < centroidY)
-    const topRight = findExtreme((c) => c.x >= centroidX && c.y < centroidY)
-    const bottomLeft = findExtreme((c) => c.x < centroidX && c.y >= centroidY)
-    const bottomRight = findExtreme((c) => c.x >= centroidX && c.y >= centroidY)
-
-    if (!topLeft || !topRight || !bottomLeft || !bottomRight) {
+    if (!bestContour) {
       return {
         detected: false,
         message:
-          "4 marker belum dapat ditentukan. Coba posisikan seluruh LJK masuk kamera dengan lebih rata.",
+          "Lembar jawaban tidak terdeteksi. Pastikan seluruh LJK terlihat jelas dan kontras dengan latar belakang meja.",
       }
     }
 
-    // =========================================
-    // 7. VALIDASI: 4 MARKER HARUS CUKUP TERSEBAR
-    //    (bukan berkumpul di satu titik / noise kecil)
-    // =========================================
+    // 7. BUNGKUS DENGAN ROTATED RECTANGLE
+    //    (tahan terhadap kertas miring / sedikit terlipat)
+    const rotatedRect = cv.minAreaRect(bestContour)
+    bestContour.delete()
+    bestContour = null
 
-    const minSpread = Math.max(imageWidth, imageHeight) * 0.15
-
-    if (
-      topLeft.distance < minSpread ||
-      topRight.distance < minSpread ||
-      bottomLeft.distance < minSpread ||
-      bottomRight.distance < minSpread
-    ) {
-      return {
-        detected: false,
-        message:
-          "4 marker terlalu berdekatan. Pastikan seluruh LJK terlihat penuh di kamera.",
-      }
-    }
+    const boxPoints = cv.RotatedRect.points(rotatedRect)
+    const pts = [boxPoints[0], boxPoints[1], boxPoints[2], boxPoints[3]]
 
     // =========================================
-    // 8. CEK POSISI RELATIF (sanity check bentuk kotak)
+    // 8. URUTKAN 4 TITIK
+    //    topLeft, topRight, bottomLeft, bottomRight
+    //    (toleran terhadap rotasi sedang)
     // =========================================
 
+    const byY = [...pts].sort((a, b) => a.y - b.y)
+    const topTwo = [byY[0], byY[1]].sort((a, b) => a.x - b.x)
+    const bottomTwo = [byY[2], byY[3]].sort((a, b) => a.x - b.x)
+
+    const topLeft = topTwo[0]
+    const topRight = topTwo[1]
+    const bottomLeft = bottomTwo[0]
+    const bottomRight = bottomTwo[1]
+
+    // 9. VALIDASI BENTUK
     if (
       topLeft.x >= topRight.x ||
       bottomLeft.x >= bottomRight.x ||
       topLeft.y >= bottomLeft.y ||
       topRight.y >= bottomRight.y
     ) {
-      console.log("Susunan marker tidak valid:", {
-        topLeft, topRight, bottomLeft, bottomRight,
-      })
-
       return {
         detected: false,
-        message: "Posisi 4 marker belum membentuk sudut LJK dengan benar. Coba foto lebih lurus/rata.",
+        message:
+          "Bentuk lembar jawaban belum terdeteksi dengan benar. Coba foto lebih lurus/rata dan pastikan latar belakang kontras.",
       }
     }
 
@@ -414,7 +354,7 @@ const detectAnswerSheet = (canvas) => {
     }
 
     console.log("================================")
-    console.log("4 MARKER BERHASIL TERDETEKSI")
+    console.log("SUDUT LJK TERDETEKSI (deteksi tepi kertas)")
     console.log("TOP LEFT:", markers.topLeft)
     console.log("TOP RIGHT:", markers.topRight)
     console.log("BOTTOM LEFT:", markers.bottomLeft)
@@ -423,19 +363,22 @@ const detectAnswerSheet = (canvas) => {
 
     return {
       detected: true,
-      message: "4 marker hitam berhasil ditemukan! ✅",
+      message: "Lembar jawaban berhasil terdeteksi! ✅",
       markers,
     }
   } catch (error) {
-    console.error("ERROR DETEKSI MARKER:", error)
-    return { detected: false, message: "Gagal mendeteksi marker LJK." }
+    console.error("ERROR DETEKSI LJK:", error)
+    return { detected: false, message: "Gagal mendeteksi lembar jawaban." }
   } finally {
     if (src) src.delete()
     if (gray) gray.delete()
-    if (binary) binary.delete()
+    if (blurred) blurred.delete()
+    if (edges) edges.delete()
+    if (dilated) dilated.delete()
     if (contours) contours.delete()
     if (hierarchy) hierarchy.delete()
     if (kernel) kernel.delete()
+    if (bestContour) bestContour.delete()
   }
 }
   // =========================
