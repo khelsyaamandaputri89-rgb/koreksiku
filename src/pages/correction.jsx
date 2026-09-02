@@ -460,7 +460,10 @@ const warpAnswerSheet = (canvas, markers) => {
   // BACA JAWABAN DINAMIS
   // =========================
 
-  const readStudentAnswers = (canvas, totalQuestions) => {
+  const readStudentAnswers = (
+  canvas,
+  totalQuestions
+) => {
   if (!window.cv || !window.cv.Mat) {
     return {}
   }
@@ -469,255 +472,318 @@ const warpAnswerSheet = (canvas, markers) => {
 
   let src = null
   let gray = null
-  let blurred = null
   let binary = null
-  let contours = null
-  let hierarchy = null
 
   try {
     src = cv.imread(canvas)
 
     gray = new cv.Mat()
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
 
-    blurred = new cv.Mat()
-    cv.GaussianBlur(gray, blurred, new cv.Size(3, 3), 0)
+    cv.cvtColor(
+      src,
+      gray,
+      cv.COLOR_RGBA2GRAY
+    )
 
     binary = new cv.Mat()
+
     cv.threshold(
-      blurred, binary, 0, 255,
+      gray,
+      binary,
+      0,
+      255,
       cv.THRESH_BINARY_INV + cv.THRESH_OTSU
     )
 
-    contours = new cv.MatVector()
-    hierarchy = new cv.Mat()
-    cv.findContours(
-      binary, contours, hierarchy,
-      cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
-    )
-
-    // =========================================
-    // 1. KUMPULKAN SEMUA KANDIDAT BUBBLE
-    //    (bentuk bulat, ukuran wajar)
-    // =========================================
-
-    const rawCandidates = []
-
-    for (let i = 0; i < contours.size(); i++) {
-      const contour = contours.get(i)
-      const area = cv.contourArea(contour)
-      const rect = cv.boundingRect(contour)
-      const perimeter = cv.arcLength(contour, true)
-
-      const width = rect.width
-      const height = rect.height
-
-      // Bubble jawaban biasanya diameter ±15-40px di canvas 900x1200
-      if (width < 10 || width > 45 || height < 10 || height > 45) {
-        contour.delete()
-        continue
-      }
-
-      const aspect = width / height
-      if (aspect < 0.7 || aspect > 1.4) {
-        contour.delete()
-        continue
-      }
-
-      const circularity =
-        perimeter > 0 ? (4 * Math.PI * area) / (perimeter * perimeter) : 0
-
-      if (circularity < 0.35) {
-        contour.delete()
-        continue
-      }
-
-      rawCandidates.push({
-        x: rect.x + rect.width / 2,
-        y: rect.y + rect.height / 2,
-        width,
-        height,
-        rectX: rect.x,
-        rectY: rect.y,
-      })
-
-      contour.delete()
-    }
-
-    console.log("JUMLAH KANDIDAT BUBBLE:", rawCandidates.length)
-
-    if (rawCandidates.length < 10) {
-      console.log("Kandidat bubble terlalu sedikit, cek pencahayaan/foto.")
-      return {}
-    }
-
-    // =========================================
-    // 2. SARING BERDASARKAN UKURAN MEDIAN
-    //    (buang noise: huruf kecil, coretan, dll)
-    // =========================================
-
-    const sortedBySize = [...rawCandidates].sort((a, b) => a.width - b.width)
-    const medianWidth = sortedBySize[Math.floor(sortedBySize.length / 2)].width
-
-    const candidates = rawCandidates.filter(
-      (c) => c.width > medianWidth * 0.6 && c.width < medianWidth * 1.5
-    )
-
-    const avgSize =
-      candidates.reduce((sum, c) => sum + c.width, 0) / candidates.length
-
-    console.log("KANDIDAT SETELAH FILTER UKURAN:", candidates.length, "avgSize:", avgSize)
-
-    // =========================================
-    // 3. KELOMPOKKAN JADI BARIS BERDASARKAN Y
-    // =========================================
-
-    const sortedByY = [...candidates].sort((a, b) => a.y - b.y)
-    const rowThreshold = avgSize * 0.6
-
-    const rows = []
-    let currentRow = []
-
-    sortedByY.forEach((c) => {
-      if (currentRow.length === 0) {
-        currentRow.push(c)
-        return
-      }
-
-      const rowAvgY =
-        currentRow.reduce((sum, p) => sum + p.y, 0) / currentRow.length
-
-      if (Math.abs(c.y - rowAvgY) <= rowThreshold) {
-        currentRow.push(c)
-      } else {
-        rows.push(currentRow)
-        currentRow = [c]
-      }
-    })
-
-    if (currentRow.length > 0) rows.push(currentRow)
-
-    rows.sort((a, b) => {
-      const ay = a.reduce((s, p) => s + p.y, 0) / a.length
-      const by = b.reduce((s, p) => s + p.y, 0) / b.length
-      return ay - by
-    })
-
-    console.log("JUMLAH BARIS TERDETEKSI:", rows.length)
-
-    // =========================================
-    // 4. BACA TINTA TIAP BUBBLE
-    // =========================================
-
-    const choices = ["A", "B", "C", "D", "E"]
-    const columns = 2
-    const questionsPerColumn = Math.ceil(totalQuestions / columns)
-
     const answers = {}
 
-    const readInkRatio = (bubble) => {
-      const padding = Math.round(bubble.width * 0.28)
+    // =====================================
+    // UKURAN HASIL WARP
+    // =====================================
 
-      const roiX = Math.round(bubble.rectX + padding)
-      const roiY = Math.round(bubble.rectY + padding)
-      const roiWidth = Math.round(bubble.width - padding * 2)
-      const roiHeight = Math.round(bubble.height - padding * 2)
+    const width = canvas.width
+    const height = canvas.height
 
-      if (
-        roiWidth <= 0 || roiHeight <= 0 ||
-        roiX < 0 || roiY < 0 ||
-        roiX + roiWidth > binary.cols ||
-        roiY + roiHeight > binary.rows
-      ) {
-        return 0
-      }
+    console.log(
+      "UKURAN CANVAS BACA:",
+      width,
+      height
+    )
 
-      const rect = new cv.Rect(roiX, roiY, roiWidth, roiHeight)
-      const roi = binary.roi(rect)
-      const ink = cv.countNonZero(roi)
-      const ratio = ink / (roiWidth * roiHeight)
-      roi.delete()
+    // =====================================
+    // LAYOUT LJK
+    // =====================================
 
-      return ratio
-    }
+    const columns = 2
 
-    const pickAnswer = (bubbles) => {
-      const inkValues = bubbles.map(readInkRatio)
+    const questionsPerColumn =
+      Math.ceil(
+        totalQuestions / columns
+      )
 
-      let highestIndex = 0
-      let secondHighest = 0
+    // =====================================
+    // POSISI AREA JAWABAN
+    // =====================================
 
-      inkValues.forEach((val, i) => {
-        if (val > inkValues[highestIndex]) {
-          secondHighest = inkValues[highestIndex]
-          highestIndex = i
-        } else if (val > secondHighest) {
-          secondHighest = val
-        }
-      })
+    const startY = 245
+    const endY = 470
 
-      const highestInk = inkValues[highestIndex]
-      const minimumInkRatio = 0.15
-      const isAmbiguous = secondHighest > highestInk * 0.75
+    const rowHeight =
+      (endY - startY) /
+      questionsPerColumn
 
-      if (highestInk < minimumInkRatio || isAmbiguous) {
-        return ""
-      }
+    // =====================================
+    // POSISI KOLOM
+    // =====================================
 
-      return choices[highestIndex] || ""
-    }
+    const leftColumnStartX = 170
+    const rightColumnStartX = 490
+
+    // =====================================
+    // UKURAN BUBBLE
+    // =====================================
+
+    const bubbleSize = 22
+    const bubbleGap = 27
+
+    const choices = [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E"
+    ]
+
+    // =====================================
+    // BACA SETIAP SOAL
+    // =====================================
 
     for (
-      let rowIndex = 0;
-      rowIndex < Math.min(rows.length, questionsPerColumn);
-      rowIndex++
+      let questionIndex = 0;
+      questionIndex < totalQuestions;
+      questionIndex++
     ) {
-      const rowPoints = [...rows[rowIndex]].sort((a, b) => a.x - b.x)
 
-      let splitAt = -1
-      let maxGap = 0
+      const questionNumber =
+        questionIndex + 1
 
-      for (let i = 1; i < rowPoints.length; i++) {
-        const gap = rowPoints[i].x - rowPoints[i - 1].x
-        if (gap > maxGap) {
-          maxGap = gap
-          splitAt = i
+      // Tentukan kolom
+      const columnIndex =
+        Math.floor(
+          questionIndex /
+          questionsPerColumn
+        )
+
+      // Tentukan baris
+      const rowIndex =
+        questionIndex %
+        questionsPerColumn
+
+      // Posisi Y
+      const rowY =
+        startY +
+        rowIndex * rowHeight
+
+      // Posisi X kolom
+      const columnStartX =
+        columnIndex === 0
+          ? leftColumnStartX
+          : rightColumnStartX
+
+      const inkValues = []
+
+      // =====================================
+      // BACA A - E
+      // =====================================
+
+      for (
+        let choiceIndex = 0;
+        choiceIndex < choices.length;
+        choiceIndex++
+      ) {
+
+        const bubbleX =
+          columnStartX +
+          choiceIndex * bubbleGap
+
+        const bubbleY =
+          rowY
+
+        // Ambil bagian tengah bubble
+        const padding = 6
+
+        const roiX =
+          Math.round(
+            bubbleX + padding
+          )
+
+        const roiY =
+          Math.round(
+            bubbleY + padding
+          )
+
+        const roiWidth =
+          Math.round(
+            bubbleSize -
+            padding * 2
+          )
+
+        const roiHeight =
+          Math.round(
+            bubbleSize -
+            padding * 2
+          )
+
+        if (
+          roiX < 0 ||
+          roiY < 0 ||
+          roiX + roiWidth >
+            binary.cols ||
+          roiY + roiHeight >
+            binary.rows
+        ) {
+          inkValues.push(0)
+          continue
+        }
+
+        const rect =
+          new cv.Rect(
+            roiX,
+            roiY,
+            roiWidth,
+            roiHeight
+          )
+
+        const roi =
+          binary.roi(rect)
+
+        const ink =
+          cv.countNonZero(roi)
+
+        const totalPixels =
+          roiWidth * roiHeight
+
+        const inkRatio =
+          ink / totalPixels
+
+        inkValues.push(inkRatio)
+
+        console.log(
+          `Soal ${questionNumber} - ${choices[choiceIndex]}:`,
+          inkRatio.toFixed(3)
+        )
+
+        roi.delete()
+      }
+
+      // =====================================
+      // CARI TINTA TERBANYAK
+      // =====================================
+
+      let highestIndex = 0
+
+      for (
+        let i = 1;
+        i < inkValues.length;
+        i++
+      ) {
+        if (
+          inkValues[i] >
+          inkValues[highestIndex]
+        ) {
+          highestIndex = i
         }
       }
 
-      let leftGroup = rowPoints
-      let rightGroup = []
+      const highestInk =
+        inkValues[highestIndex]
 
-      if (maxGap > avgSize * 1.8 && splitAt > 0) {
-        leftGroup = rowPoints.slice(0, splitAt)
-        rightGroup = rowPoints.slice(splitAt)
+      // =====================================
+      // CARI NILAI KEDUA TERBESAR
+      // =====================================
+
+      const sortedValues =
+        [...inkValues].sort(
+          (a, b) => b - a
+        )
+
+      const secondHighest =
+        sortedValues[1] || 0
+
+      // =====================================
+      // BATAS TINTA
+      // =====================================
+
+      const minimumInk = 0.10
+
+      // =====================================
+      // CEK AMBIGU
+      // =====================================
+
+      const isAmbiguous =
+        secondHighest >
+        highestInk * 0.80
+
+      if (
+        highestInk < minimumInk
+      ) {
+
+        answers[questionNumber] = ""
+
+      } else if (
+        isAmbiguous
+      ) {
+
+        answers[questionNumber] = ""
+
+      } else {
+
+        answers[questionNumber] =
+          choices[highestIndex]
       }
 
-      const leftQuestionNumber = rowIndex + 1
-
-      if (leftQuestionNumber <= totalQuestions && leftGroup.length >= 3) {
-        answers[leftQuestionNumber] = pickAnswer(leftGroup.slice(0, choices.length))
-      }
-
-      const rightQuestionNumber = questionsPerColumn + rowIndex + 1
-
-      if (rightQuestionNumber <= totalQuestions && rightGroup.length >= 3) {
-        answers[rightQuestionNumber] = pickAnswer(rightGroup.slice(0, choices.length))
-      }
+      console.log(
+        `HASIL SOAL ${questionNumber}:`,
+        answers[questionNumber] || "KOSONG",
+        "| nilai:",
+        inkValues.map(
+          (value) =>
+            value.toFixed(3)
+        )
+      )
     }
 
-    console.log("HASIL JAWABAN (auto-detect):", answers)
+    console.log(
+      "================================"
+    )
+
+    console.log(
+      "HASIL JAWABAN:",
+      answers
+    )
+
+    console.log(
+      "================================"
+    )
+
     return answers
+
   } catch (error) {
-    console.error("Error membaca jawaban:", error)
+
+    console.error(
+      "Error membaca jawaban:",
+      error
+    )
+
     return {}
+
   } finally {
+
     if (src) src.delete()
+
     if (gray) gray.delete()
-    if (blurred) blurred.delete()
+
     if (binary) binary.delete()
-    if (contours) contours.delete()
-    if (hierarchy) hierarchy.delete()
   }
 }
 
