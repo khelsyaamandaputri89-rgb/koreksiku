@@ -15,6 +15,7 @@ function correction() {
   const [studentAnswers, setStudentAnswers] = useState({})
   const [correctionResult, setCorrectionResult] = useState(null)
   const [studentName, setStudentName] = useState("")
+  const [calibratePoint, setCalibratePoint] = useState(null)
 
   useEffect(() => {
     fetchExams()
@@ -64,7 +65,23 @@ function correction() {
       return []
     }
 
-    return data || []
+    // =========================
+    // HAPUS DUPLIKAT question_number
+    // Kalau ada nomor yang kembar,
+    // ambil baris terakhir saja.
+    // =========================
+
+    const uniqueMap = new Map()
+
+    ;(data || []).forEach((row) => {
+      uniqueMap.set(row.question_number, row)
+    })
+
+    const uniqueKeys = Array.from(uniqueMap.values()).sort(
+      (a, b) => a.question_number - b.question_number
+    )
+
+    return uniqueKeys
   }
 
   // =========================
@@ -598,6 +615,42 @@ const warpAnswerSheet = (canvas, markers) => {
   }
 }
 
+const handlePreviewClick = (e) => {
+  const img = e.target
+  const rect = img.getBoundingClientRect()
+  const naturalWidth = img.naturalWidth
+  const naturalHeight = img.naturalHeight
+
+  const containerRatio = rect.width / rect.height
+  const imageRatio = naturalWidth / naturalHeight
+
+  let renderedWidth, renderedHeight, offsetX, offsetY
+
+  if (imageRatio > containerRatio) {
+    renderedWidth = rect.width
+    renderedHeight = rect.width / imageRatio
+    offsetX = 0
+    offsetY = (rect.height - renderedHeight) / 2
+  } else {
+    renderedHeight = rect.height
+    renderedWidth = rect.height * imageRatio
+    offsetY = 0
+    offsetX = (rect.width - renderedWidth) / 2
+  }
+
+  const clickX = e.clientX - rect.left - offsetX
+  const clickY = e.clientY - rect.top - offsetY
+
+  if (clickX < 0 || clickY < 0 || clickX > renderedWidth || clickY > renderedHeight) {
+    return
+  }
+
+  const naturalX = Math.round((clickX / renderedWidth) * naturalWidth)
+  const naturalY = Math.round((clickY / renderedHeight) * naturalHeight)
+
+  setCalibratePoint({ x: naturalX, y: naturalY })
+}
+
   const handleScan = async () => {
     if (!videoRef.current) return
 
@@ -1065,9 +1118,16 @@ const warpAnswerSheet = (canvas, markers) => {
                 <img
                   src={preview}
                   alt="Hasil scan"
-                  className="max-h-[700px] w-full object-contain"
+                  onClick={handlePreviewClick}
+                  className="max-h-[700px] w-full cursor-crosshair object-contain"
                 />
               </div>
+
+              {calibratePoint && (
+                <div className="mt-2 rounded-lg bg-slate-800 px-4 py-2 text-center text-sm font-mono text-white">
+                  Koordinat diklik: X = {calibratePoint.x}, Y = {calibratePoint.y}
+                </div>
+              )}
 
             </div>
           )}
