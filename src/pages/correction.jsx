@@ -480,40 +480,32 @@ function correction() {
   // =========================
 
   const warpAnswerSheet = (canvas, markers) => {
-  const cv = window.cv
+    const cv = window.cv
 
-  let src = null
-  let dst = null
-  let srcTri = null
-  let dstTri = null
-  let matrix = null
+    let src = null
+    let dst = null
+    let srcTri = null
+    let dstTri = null
+    let matrix = null
 
-  try {
-    src = cv.imread(canvas)
+    try {
+      src = cv.imread(canvas)
 
-    /*
-      Ukuran hasil LJK
-    */
+      const width = 900
+      const height = 1200
 
-    const width = 900
-    const height = 1200
+      dst = new cv.Mat()
 
-    dst = new cv.Mat()
+      /*
+        Pastikan urutan titik:
 
-    /*
-      Urutan HARUS:
+        kiri atas
+        kanan atas
+        kanan bawah
+        kiri bawah
+      */
 
-      1. kiri atas
-      2. kanan atas
-      3. kanan bawah
-      4. kiri bawah
-    */
-
-    srcTri = cv.matFromArray(
-      4,
-      1,
-      cv.CV_32FC2,
-      [
+      const srcPoints = [
         markers.topLeft.x,
         markers.topLeft.y,
 
@@ -526,79 +518,87 @@ function correction() {
         markers.bottomLeft.x,
         markers.bottomLeft.y,
       ]
-    )
 
-    dstTri = cv.matFromArray(
-      4,
-      1,
-      cv.CV_32FC2,
-      [
-        0,
-        0,
-
-        width - 1,
-        0,
-
-        width - 1,
-        height - 1,
-
-        0,
-        height - 1,
-      ]
-    )
-
-    matrix = cv.getPerspectiveTransform(
-      srcTri,
-      dstTri
-    )
-
-    cv.warpPerspective(
-      src,
-      dst,
-      matrix,
-      new cv.Size(
-        width,
-        height
-      ),
-      cv.INTER_LINEAR,
-      cv.BORDER_CONSTANT,
-      new cv.Scalar(
-        255,
-        255,
-        255,
-        255
+      console.log(
+        "TITIK WARP:",
+        srcPoints
       )
-    )
 
-    const resultCanvas =
-      document.createElement("canvas")
+      srcTri = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        srcPoints
+      )
 
-    resultCanvas.width = width
-    resultCanvas.height = height
+      dstTri = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        [
+          0,
+          0,
 
-    cv.imshow(
-      resultCanvas,
-      dst
-    )
+          width - 1,
+          0,
 
-    return resultCanvas
+          width - 1,
+          height - 1,
 
-  } catch (error) {
-    console.error(
-      "Error meluruskan LJK:",
-      error
-    )
+          0,
+          height - 1,
+        ]
+      )
 
-    return null
+      matrix = cv.getPerspectiveTransform(
+        srcTri,
+        dstTri
+      )
 
-  } finally {
-    if (src) src.delete()
-    if (dst) dst.delete()
-    if (srcTri) srcTri.delete()
-    if (dstTri) dstTri.delete()
-    if (matrix) matrix.delete()
+      cv.warpPerspective(
+        src,
+        dst,
+        matrix,
+        new cv.Size(width, height),
+        cv.INTER_LINEAR,
+        cv.BORDER_CONSTANT,
+        new cv.Scalar(
+          255,
+          255,
+          255,
+          255
+        )
+      )
+
+      const resultCanvas =
+        document.createElement("canvas")
+
+      resultCanvas.width = width
+      resultCanvas.height = height
+
+      cv.imshow(
+        resultCanvas,
+        dst
+      )
+
+      return resultCanvas
+
+    } catch (error) {
+      console.error(
+        "Error meluruskan LJK:",
+        error
+      )
+
+      return null
+
+    } finally {
+      if (src) src.delete()
+      if (dst) dst.delete()
+      if (srcTri) srcTri.delete()
+      if (dstTri) dstTri.delete()
+      if (matrix) matrix.delete()
+    }
   }
-}
 
   // =========================
   // BACA JAWABAN DINAMIS
