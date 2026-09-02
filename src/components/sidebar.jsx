@@ -38,13 +38,6 @@ function Sidebar() {
           📷 Koreksi
         </a>
 
-        <a
-          href="/history"
-          className="block px-4 py-3 rounded-lg hover:bg-gray-100"
-        >
-          📊 Riwayat
-        </a>
-
       </nav>
 
     </aside>

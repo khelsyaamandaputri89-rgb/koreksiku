@@ -882,60 +882,6 @@ function correction() {
     if (binary) binary.delete()
   }
 }
-  
-  const saveCorrectionResult = async (result, answers, answerKeys) => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      console.error("User belum login")
-      return false
-    }
-
-    // Simpan hasil koreksi utama
-    const { data: correctionData, error: correctionError } = await supabase
-      .from("correction_results")
-      .insert([
-        {
-          user_id: user.id,
-          question_id: selectedExam,
-          student_name: studentName.trim(),
-          total_questions: result.total,
-          correct_answers: result.correct,
-          wrong_answers: result.wrong,
-          score: result.score,
-        },
-      ])
-      .select()
-      .single()
-
-    if (correctionError) {
-      console.error("Error menyimpan hasil koreksi:", correctionError)
-      return false
-    }
-
-    // Siapkan jawaban siswa per nomor
-    const studentAnswersData = answerKeys.map((key) => ({
-      correction_result_id: correctionData.id,
-      question_number: key.question_number,
-      answer: answers[key.question_number] || "",
-      is_correct:
-        answers[key.question_number] === key.answer,
-    }))
-
-    // Simpan jawaban siswa
-    const { error: answersError } = await supabase
-      .from("student_answers")
-      .insert(studentAnswersData)
-
-    if (answersError) {
-      console.error("Error menyimpan jawaban siswa:", answersError)
-      return false
-    }
-
-    return true
-  }
 
   const handleScan = async () => {
     if (!videoRef.current) return
@@ -1079,18 +1025,8 @@ function correction() {
 
       setCorrectionResult(resultCorrection)
 
-      const saved = await saveCorrectionResult(
-        resultCorrection,
-        detectedAnswers,
-        answerKeys
-      )
-
-      if (saved) {
-        setMessage("Koreksi selesai dan hasil berhasil disimpan! 🎉")
-      } else {
-        setMessage("Koreksi selesai, tetapi hasil gagal disimpan.")
-      }
-
+      setMessage("Koreksi selesai! 🎉")
+      
     } catch (error) {
       console.error(
         "Scan error:",

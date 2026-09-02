@@ -4,7 +4,6 @@ import Dashboard from "./pages/dashboard"
 import Questions from "./pages/questions"
 import CreateQuestion from "./pages/createQuestion"
 import Correction from "./pages/correction"
-import History from "./pages/history"
 import DashboardLayout from "./layouts/dashboardLayout"
 import Login from "./pages/login"
 import Register from "./pages/register"
@@ -76,15 +75,6 @@ function App() {
             element={
             <ProtectedRoute>
               <Correction />
-            </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/history"
-            element={
-            <ProtectedRoute>
-              <History />
             </ProtectedRoute>
             }
           />
