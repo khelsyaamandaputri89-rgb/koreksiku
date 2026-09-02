@@ -256,7 +256,7 @@ function correction() {
       )
 
       /*
-        Cari objek hitam.
+        Cari objek yang benar-benar gelap
       */
 
       binary = new cv.Mat()
@@ -264,7 +264,7 @@ function correction() {
       cv.threshold(
         gray,
         binary,
-        80,
+        100,
         255,
         cv.THRESH_BINARY_INV
       )
@@ -276,7 +276,7 @@ function correction() {
         binary,
         contours,
         hierarchy,
-        cv.RETR_EXTERNAL,
+        cv.RETR_LIST,
         cv.CHAIN_APPROX_SIMPLE
       )
 
@@ -287,7 +287,11 @@ function correction() {
 
         const area = cv.contourArea(contour)
 
-        if (area < 300 || area > 15000) {
+        /*
+          Ukuran marker
+        */
+
+        if (area < 200 || area > 20000) {
           contour.delete()
           continue
         }
@@ -297,9 +301,13 @@ function correction() {
         const width = rect.width
         const height = rect.height
 
+        if (width < 10 || height < 10) {
+          contour.delete()
+          continue
+        }
+
         /*
-          Marker harus berbentuk
-          kotak / persegi panjang.
+          Marker biasanya mendekati kotak.
         */
 
         const ratio = width / height
@@ -310,105 +318,120 @@ function correction() {
         }
 
         /*
-          Hindari objek terlalu tipis.
+          Cek bentuk kotak menggunakan contour.
         */
 
-        if (width < 15 || height < 15) {
-          contour.delete()
-          continue
+        const perimeter =
+          cv.arcLength(contour, true)
+
+        const approx = new cv.Mat()
+
+        cv.approxPolyDP(
+          contour,
+          approx,
+          0.04 * perimeter,
+          true
+        )
+
+        if (approx.rows >= 4 && approx.rows <= 6) {
+          candidates.push({
+            x: rect.x + rect.width / 2,
+            y: rect.y + rect.height / 2,
+            width,
+            height,
+            area,
+          })
         }
 
-        candidates.push({
-          x: rect.x + rect.width / 2,
-          y: rect.y + rect.height / 2,
-          width: rect.width,
-          height: rect.height,
-          area,
-        })
-
+        approx.delete()
         contour.delete()
       }
 
       console.log(
-        "Kandidat marker:",
+        "KANDIDAT MARKER:",
         candidates
       )
 
       /*
-        Kita harus mendapatkan
-        4 marker.
+        Minimal harus ada 4 kandidat
       */
 
       if (candidates.length < 4) {
         return {
           detected: false,
           message:
-            "4 marker hitam belum terdeteksi. Pastikan semua marker terlihat.",
+            `Marker hitam terdeteksi ${candidates.length}/4. Pastikan 4 marker terlihat jelas.`,
         }
       }
 
       /*
-        Ambil kandidat berdasarkan
-        posisi 4 penjuru gambar.
+        Ambil kandidat berdasarkan posisi ekstrem.
+        
+        Tidak menggunakan batas 50% lagi.
       */
 
-      const imageWidth = canvas.width
-      const imageHeight = canvas.height
-
-      const topLeftCandidates = candidates.filter(
-        (p) =>
-          p.x < imageWidth * 0.5 &&
-          p.y < imageHeight * 0.5
+      const topLeft = candidates.reduce(
+        (best, current) =>
+          current.x + current.y <
+          best.x + best.y
+            ? current
+            : best
       )
 
-      const topRightCandidates = candidates.filter(
-        (p) =>
-          p.x >= imageWidth * 0.5 &&
-          p.y < imageHeight * 0.5
+      const topRight = candidates.reduce(
+        (best, current) =>
+          current.x - current.y >
+          best.x - best.y
+            ? current
+            : best
       )
 
-      const bottomLeftCandidates = candidates.filter(
-        (p) =>
-          p.x < imageWidth * 0.5 &&
-          p.y >= imageHeight * 0.5
+      const bottomLeft = candidates.reduce(
+        (best, current) =>
+          current.x - current.y <
+          best.x - best.y
+            ? current
+            : best
       )
 
-      const bottomRightCandidates = candidates.filter(
-        (p) =>
-          p.x >= imageWidth * 0.5 &&
-          p.y >= imageHeight * 0.5
+      const bottomRight = candidates.reduce(
+        (best, current) =>
+          current.x + current.y >
+          best.x + best.y
+            ? current
+            : best
       )
 
-      if (
-        topLeftCandidates.length === 0 ||
-        topRightCandidates.length === 0 ||
-        bottomLeftCandidates.length === 0 ||
-        bottomRightCandidates.length === 0
-      ) {
+      /*
+        Pastikan 4 marker berbeda.
+      */
+
+      const selected = [
+        topLeft,
+        topRight,
+        bottomLeft,
+        bottomRight,
+      ]
+
+      const unique = new Set(
+        selected.map(
+          (marker) =>
+            `${Math.round(marker.x)}-${Math.round(marker.y)}`
+        )
+      )
+
+      if (unique.size < 4) {
+        console.log(
+          "Marker yang ditemukan belum membentuk 4 sudut:",
+          selected
+        )
+
         return {
           detected: false,
           message:
-            "Posisi 4 marker belum lengkap. Pastikan seluruh marker terlihat.",
+            "4 marker belum dapat dipisahkan dengan jelas. Coba posisikan LJK lebih lurus.",
         }
       }
-
-      /*
-        Pilih kandidat terbesar
-        dari masing-masing area.
-      */
-
-      const getBest = (list) => {
-        return list.reduce((best, current) =>
-          current.area > best.area
-            ? current
-            : best
-        )
-      }
-
-      const topLeft = getBest(topLeftCandidates)
-      const topRight = getBest(topRightCandidates)
-      const bottomLeft = getBest(bottomLeftCandidates)
-      const bottomRight = getBest(bottomRightCandidates)
 
       console.log(
         "4 MARKER TERDETEKSI:",
@@ -422,7 +445,8 @@ function correction() {
 
       return {
         detected: true,
-        message: "4 marker hitam berhasil ditemukan! ✅",
+        message:
+          "4 marker hitam berhasil ditemukan! ✅",
         markers: {
           topLeft,
           topRight,
