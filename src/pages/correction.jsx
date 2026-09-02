@@ -229,192 +229,228 @@ function correction() {
   // =========================
 
   const detectAnswerSheet = (canvas) => {
-  if (!window.cv || !window.cv.Mat) {
-    return {
-      detected: false,
-      message: "OpenCV belum siap.",
+    if (!window.cv || !window.cv.Mat) {
+      return {
+        detected: false,
+        message: "OpenCV belum siap.",
+      }
     }
-  }
 
-  const cv = window.cv
+    const cv = window.cv
 
-  let src = null
-  let gray = null
-  let blur = null
-  let edges = null
-  let contours = null
-  let hierarchy = null
+    let src = null
+    let gray = null
+    let binary = null
+    let contours = null
+    let hierarchy = null
 
-  try {
-    src = cv.imread(canvas)
+    try {
+      src = cv.imread(canvas)
 
-    gray = new cv.Mat()
+      gray = new cv.Mat()
 
-    cv.cvtColor(
-      src,
-      gray,
-      cv.COLOR_RGBA2GRAY
-    )
+      cv.cvtColor(
+        src,
+        gray,
+        cv.COLOR_RGBA2GRAY
+      )
 
-    blur = new cv.Mat()
+      /*
+        Cari objek hitam.
+      */
 
-    cv.GaussianBlur(
-      gray,
-      blur,
-      new cv.Size(5, 5),
-      0
-    )
+      binary = new cv.Mat()
 
-    edges = new cv.Mat()
+      cv.threshold(
+        gray,
+        binary,
+        80,
+        255,
+        cv.THRESH_BINARY_INV
+      )
 
-    cv.Canny(
-      blur,
-      edges,
-      50,
-      150
-    )
+      contours = new cv.MatVector()
+      hierarchy = new cv.Mat()
 
-    contours = new cv.MatVector()
-    hierarchy = new cv.Mat()
+      cv.findContours(
+        binary,
+        contours,
+        hierarchy,
+        cv.RETR_EXTERNAL,
+        cv.CHAIN_APPROX_SIMPLE
+      )
 
-    cv.findContours(
-      edges,
-      contours,
-      hierarchy,
-      cv.RETR_LIST,
-      cv.CHAIN_APPROX_SIMPLE
-    )
+      const candidates = []
 
-    let biggestArea = 0
-    let biggestCorners = null
+      for (let i = 0; i < contours.size(); i++) {
+        const contour = contours.get(i)
 
-    for (let i = 0; i < contours.size(); i++) {
-      const contour = contours.get(i)
+        const area = cv.contourArea(contour)
 
-      const area = cv.contourArea(contour)
-
-      if (area > biggestArea) {
-        const perimeter =
-          cv.arcLength(contour, true)
-
-        const approx = new cv.Mat()
-
-        cv.approxPolyDP(
-          contour,
-          approx,
-          0.02 * perimeter,
-          true
-        )
-
-        if (approx.rows === 4) {
-          biggestArea = area
-
-          const points = []
-
-          for (let j = 0; j < 4; j++) {
-            points.push({
-              x: approx.data32S[j * 2],
-              y: approx.data32S[j * 2 + 1],
-            })
-          }
-
-          biggestCorners = points
+        if (area < 300 || area > 15000) {
+          contour.delete()
+          continue
         }
 
-        approx.delete()
+        const rect = cv.boundingRect(contour)
+
+        const width = rect.width
+        const height = rect.height
+
+        /*
+          Marker harus berbentuk
+          kotak / persegi panjang.
+        */
+
+        const ratio = width / height
+
+        if (ratio < 0.5 || ratio > 2) {
+          contour.delete()
+          continue
+        }
+
+        /*
+          Hindari objek terlalu tipis.
+        */
+
+        if (width < 15 || height < 15) {
+          contour.delete()
+          continue
+        }
+
+        candidates.push({
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+          width: rect.width,
+          height: rect.height,
+          area,
+        })
+
+        contour.delete()
       }
 
-      contour.delete()
-    }
+      console.log(
+        "Kandidat marker:",
+        candidates
+      )
 
-    if (!biggestCorners) {
+      /*
+        Kita harus mendapatkan
+        4 marker.
+      */
+
+      if (candidates.length < 4) {
+        return {
+          detected: false,
+          message:
+            "4 marker hitam belum terdeteksi. Pastikan semua marker terlihat.",
+        }
+      }
+
+      /*
+        Ambil kandidat berdasarkan
+        posisi 4 penjuru gambar.
+      */
+
+      const imageWidth = canvas.width
+      const imageHeight = canvas.height
+
+      const topLeftCandidates = candidates.filter(
+        (p) =>
+          p.x < imageWidth * 0.5 &&
+          p.y < imageHeight * 0.5
+      )
+
+      const topRightCandidates = candidates.filter(
+        (p) =>
+          p.x >= imageWidth * 0.5 &&
+          p.y < imageHeight * 0.5
+      )
+
+      const bottomLeftCandidates = candidates.filter(
+        (p) =>
+          p.x < imageWidth * 0.5 &&
+          p.y >= imageHeight * 0.5
+      )
+
+      const bottomRightCandidates = candidates.filter(
+        (p) =>
+          p.x >= imageWidth * 0.5 &&
+          p.y >= imageHeight * 0.5
+      )
+
+      if (
+        topLeftCandidates.length === 0 ||
+        topRightCandidates.length === 0 ||
+        bottomLeftCandidates.length === 0 ||
+        bottomRightCandidates.length === 0
+      ) {
+        return {
+          detected: false,
+          message:
+            "Posisi 4 marker belum lengkap. Pastikan seluruh marker terlihat.",
+        }
+      }
+
+      /*
+        Pilih kandidat terbesar
+        dari masing-masing area.
+      */
+
+      const getBest = (list) => {
+        return list.reduce((best, current) =>
+          current.area > best.area
+            ? current
+            : best
+        )
+      }
+
+      const topLeft = getBest(topLeftCandidates)
+      const topRight = getBest(topRightCandidates)
+      const bottomLeft = getBest(bottomLeftCandidates)
+      const bottomRight = getBest(bottomRightCandidates)
+
+      console.log(
+        "4 MARKER TERDETEKSI:",
+        {
+          topLeft,
+          topRight,
+          bottomLeft,
+          bottomRight,
+        }
+      )
+
+      return {
+        detected: true,
+        message: "4 marker hitam berhasil ditemukan! ✅",
+        markers: {
+          topLeft,
+          topRight,
+          bottomLeft,
+          bottomRight,
+        },
+      }
+
+    } catch (error) {
+      console.error(
+        "Error deteksi marker:",
+        error
+      )
+
       return {
         detected: false,
         message:
-          "Lembar jawaban belum terdeteksi. Pastikan seluruh kertas terlihat.",
+          "Gagal mendeteksi marker LJK.",
       }
+
+    } finally {
+      if (src) src.delete()
+      if (gray) gray.delete()
+      if (binary) binary.delete()
+      if (contours) contours.delete()
+      if (hierarchy) hierarchy.delete()
     }
-
-    /*
-      Urutkan 4 sudut kertas
-    */
-
-    const points = biggestCorners
-
-    const topLeft =
-      points.reduce((prev, curr) =>
-        curr.x + curr.y <
-        prev.x + prev.y
-          ? curr
-          : prev
-      )
-
-    const bottomRight =
-      points.reduce((prev, curr) =>
-        curr.x + curr.y >
-        prev.x + prev.y
-          ? curr
-          : prev
-      )
-
-    const topRight =
-      points.reduce((prev, curr) =>
-        curr.x - curr.y >
-        prev.x - prev.y
-          ? curr
-          : prev
-      )
-
-    const bottomLeft =
-      points.reduce((prev, curr) =>
-        curr.x - curr.y <
-        prev.x - prev.y
-          ? curr
-          : prev
-      )
-
-    console.log(
-      "SUDUT LJK:",
-      {
-        topLeft,
-        topRight,
-        bottomLeft,
-        bottomRight,
-      }
-    )
-
-    return {
-      detected: true,
-      message:
-        "Lembar jawaban berhasil ditemukan! ✅",
-      markers: {
-        topLeft,
-        topRight,
-        bottomLeft,
-        bottomRight,
-      },
-    }
-
-  } catch (error) {
-    console.error(
-      "Error deteksi LJK:",
-      error
-    )
-
-    return {
-      detected: false,
-      message:
-        "Gagal mendeteksi lembar jawaban.",
-    }
-  } finally {
-    if (src) src.delete()
-    if (gray) gray.delete()
-    if (blur) blur.delete()
-    if (edges) edges.delete()
-    if (contours) contours.delete()
-    if (hierarchy) hierarchy.delete()
   }
-}
   // =========================
   // LURUSKAN FOTO LJK
   // =========================
@@ -1020,10 +1056,6 @@ function correction() {
       } else {
         setMessage("Koreksi selesai, tetapi hasil gagal disimpan.")
       }
-
-      setMessage(
-        "Koreksi selesai! 🎉"
-      )
 
     } catch (error) {
       console.error(
