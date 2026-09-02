@@ -1026,7 +1026,6 @@ function correction() {
       setCorrectionResult(resultCorrection)
 
       setMessage("Koreksi selesai! 🎉")
-      
     } catch (error) {
       console.error(
         "Scan error:",
