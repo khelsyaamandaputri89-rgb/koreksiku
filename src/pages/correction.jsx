@@ -255,177 +255,55 @@ const detectAnswerSheet = (canvas) => {
     const imageWidth = src.cols
     const imageHeight = src.rows
 
-    console.log(
-      "UKURAN GAMBAR:",
-      imageWidth,
-      "x",
-      imageHeight
-    )
-
-    // =========================
     // 1. GRAYSCALE
-    // =========================
-
     gray = new cv.Mat()
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
 
-    cv.cvtColor(
-      src,
-      gray,
-      cv.COLOR_RGBA2GRAY
-    )
-
-    // =========================
     // 2. THRESHOLD
-    // =========================
-
     binary = new cv.Mat()
+    cv.threshold(gray, binary, 120, 255, cv.THRESH_BINARY_INV)
 
-    cv.threshold(
-      gray,
-      binary,
-      120,
-      255,
-      cv.THRESH_BINARY_INV
-    )
-
-    // =========================
     // 3. MORPHOLOGY
-    // Menyatukan bagian marker
-    // yang mungkin terpecah
-    // =========================
+    kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5))
+    cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel)
 
-    kernel = cv.getStructuringElement(
-      cv.MORPH_RECT,
-      new cv.Size(5, 5)
-    )
-
-    cv.morphologyEx(
-      binary,
-      binary,
-      cv.MORPH_CLOSE,
-      kernel
-    )
-
-    // =========================
     // 4. CARI CONTOUR
-    // =========================
-
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
-
     cv.findContours(
-      binary,
-      contours,
-      hierarchy,
-      cv.RETR_EXTERNAL,
-      cv.CHAIN_APPROX_SIMPLE
+      binary, contours, hierarchy,
+      cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
     )
 
     const candidates = []
 
-    // =========================
     // 5. FILTER KANDIDAT
-    // =========================
-
-    for (
-      let i = 0;
-      i < contours.size();
-      i++
-    ) {
-      const contour =
-        contours.get(i)
-
-      const area =
-        cv.contourArea(contour)
-
-      const rect =
-        cv.boundingRect(contour)
-
+    for (let i = 0; i < contours.size(); i++) {
+      const contour = contours.get(i)
+      const area = cv.contourArea(contour)
+      const rect = cv.boundingRect(contour)
       const width = rect.width
       const height = rect.height
 
-      // Ukuran minimal
-      if (
-        width < 12 ||
-        height < 12
-      ) {
-        contour.delete()
-        continue
-      }
+      if (width < 12 || height < 12) { contour.delete(); continue }
+      if (width > imageWidth * 0.25 || height > imageHeight * 0.25) { contour.delete(); continue }
 
-      // Ukuran maksimal
-      if (
-        width > imageWidth * 0.25 ||
-        height > imageHeight * 0.25
-      ) {
-        contour.delete()
-        continue
-      }
+      const ratio = width / height
+      if (ratio < 0.65 || ratio > 1.5) { contour.delete(); continue }
 
-      // Rasio bentuk harus mendekati kotak
-      const ratio =
-        width / height
+      const rectArea = width * height
+      const rectangularity = area / rectArea
+      if (rectangularity < 0.45) { contour.delete(); continue }
 
-      if (
-        ratio < 0.65 ||
-        ratio > 1.5
-      ) {
-        contour.delete()
-        continue
-      }
+      const perimeter = cv.arcLength(contour, true)
+      const approx = new cv.Mat()
+      cv.approxPolyDP(contour, approx, 0.04 * perimeter, true)
 
-      // =========================
-      // RECTANGULARITY
-      // =========================
-
-      const rectArea =
-        width * height
-
-      const rectangularity =
-        area / rectArea
-
-      if (rectangularity < 0.45) {
-        contour.delete()
-        continue
-      }
-
-      // =========================
-      // APPROX POLYGON
-      // =========================
-
-      const perimeter =
-        cv.arcLength(
-          contour,
-          true
-        )
-
-      const approx =
-        new cv.Mat()
-
-      cv.approxPolyDP(
-        contour,
-        approx,
-        0.04 * perimeter,
-        true
-      )
-
-      if (
-        approx.rows >= 4 &&
-        approx.rows <= 6
-      ) {
+      if (approx.rows >= 4 && approx.rows <= 6) {
         candidates.push({
-          x:
-            rect.x +
-            rect.width / 2,
-
-          y:
-            rect.y +
-            rect.height / 2,
-
-          width,
-          height,
-          area,
-          rectangularity,
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+          width, height, area, rectangularity,
         })
       }
 
@@ -433,200 +311,84 @@ const detectAnswerSheet = (canvas) => {
       contour.delete()
     }
 
-    console.log(
-      "SEMUA KANDIDAT MARKER:",
-      candidates
-    )
-
-    // =========================
-    // 6. HARUS ADA MINIMAL 4
-    // =========================
+    console.log("SEMUA KANDIDAT MARKER:", candidates)
 
     if (candidates.length < 4) {
       return {
         detected: false,
-        message:
-          `Marker hitam terdeteksi ${candidates.length}/4. Pastikan keempat marker terlihat jelas.`,
+        message: `Marker hitam terdeteksi ${candidates.length}/4. Pastikan keempat marker terlihat jelas.`,
       }
     }
 
-    // =========================
-    // 7. HITUNG JARAK KE
-    //    4 SUDUT GAMBAR
-    // =========================
+    // =========================================
+    // 6. PILIH 4 MARKER BERDASARKAN POSISI
+    //    RELATIF ANTAR KANDIDAT (BUKAN SUDUT KAMERA)
+    // =========================================
 
-    const distance = (
-      x1,
-      y1,
-      x2,
-      y2
-    ) => {
-      return Math.sqrt(
-        Math.pow(x1 - x2, 2) +
-        Math.pow(y1 - y2, 2)
-      )
-    }
+    const centroidX =
+      candidates.reduce((sum, c) => sum + c.x, 0) / candidates.length
+    const centroidY =
+      candidates.reduce((sum, c) => sum + c.y, 0) / candidates.length
 
-    const corners = {
-      topLeft: {
-        x: 0,
-        y: 0,
-      },
+    const distFromCentroid = (c) =>
+      Math.sqrt((c.x - centroidX) ** 2 + (c.y - centroidY) ** 2)
 
-      topRight: {
-        x: imageWidth,
-        y: 0,
-      },
-
-      bottomLeft: {
-        x: 0,
-        y: imageHeight,
-      },
-
-      bottomRight: {
-        x: imageWidth,
-        y: imageHeight,
-      },
-    }
-
-    // =========================
-    // 8. CARI KANDIDAT TERDEKAT
-    //    KE MASING-MASING SUDUT
-    // =========================
-
-    const findNearest = (
-      corner,
-      used
-    ) => {
+    const findExtreme = (predicate) => {
       let best = null
-      let bestDistance = Infinity
+      let bestDistance = -1
 
-      candidates.forEach(
-        (candidate, index) => {
-          if (used.has(index)) {
-            return
-          }
+      candidates.forEach((c, index) => {
+        if (!predicate(c)) return
 
-          const d = distance(
-            candidate.x,
-            candidate.y,
-            corner.x,
-            corner.y
-          )
+        const d = distFromCentroid(c)
 
-          if (d < bestDistance) {
-            bestDistance = d
-            best = {
-              ...candidate,
-              index,
-              distance: d,
-            }
-          }
+        if (d > bestDistance) {
+          bestDistance = d
+          best = { ...c, index, distance: d }
         }
-      )
+      })
 
       return best
     }
 
-    const used = new Set()
+    // Ambil kandidat TERJAUH dari centroid di tiap kuadran
+    // relatif terhadap centroid KANDIDAT ITU SENDIRI
+    const topLeft = findExtreme((c) => c.x < centroidX && c.y < centroidY)
+    const topRight = findExtreme((c) => c.x >= centroidX && c.y < centroidY)
+    const bottomLeft = findExtreme((c) => c.x < centroidX && c.y >= centroidY)
+    const bottomRight = findExtreme((c) => c.x >= centroidX && c.y >= centroidY)
 
-    const topLeft =
-      findNearest(
-        corners.topLeft,
-        used
-      )
-
-    if (topLeft) {
-      used.add(topLeft.index)
+    if (!topLeft || !topRight || !bottomLeft || !bottomRight) {
+      return {
+        detected: false,
+        message:
+          "4 marker belum dapat ditentukan. Coba posisikan seluruh LJK masuk kamera dengan lebih rata.",
+      }
     }
 
-    const topRight =
-      findNearest(
-        corners.topRight,
-        used
-      )
+    // =========================================
+    // 7. VALIDASI: 4 MARKER HARUS CUKUP TERSEBAR
+    //    (bukan berkumpul di satu titik / noise kecil)
+    // =========================================
 
-    if (topRight) {
-      used.add(topRight.index)
-    }
-
-    const bottomLeft =
-      findNearest(
-        corners.bottomLeft,
-        used
-      )
-
-    if (bottomLeft) {
-      used.add(bottomLeft.index)
-    }
-
-    const bottomRight =
-      findNearest(
-        corners.bottomRight,
-        used
-      )
-
-    if (bottomRight) {
-      used.add(bottomRight.index)
-    }
-
-    // =========================
-    // 9. CEK 4 MARKER
-    // =========================
+    const minSpread = Math.max(imageWidth, imageHeight) * 0.15
 
     if (
-      !topLeft ||
-      !topRight ||
-      !bottomLeft ||
-      !bottomRight
+      topLeft.distance < minSpread ||
+      topRight.distance < minSpread ||
+      bottomLeft.distance < minSpread ||
+      bottomRight.distance < minSpread
     ) {
       return {
         detected: false,
         message:
-          "4 marker belum dapat ditentukan. Coba posisikan seluruh LJK masuk kamera.",
+          "4 marker terlalu berdekatan. Pastikan seluruh LJK terlihat penuh di kamera.",
       }
     }
 
-    // =========================
-    // 10. BATAS JARAK MARKER
-    // =========================
-
-    const maxCornerDistance =
-      Math.max(
-        imageWidth,
-        imageHeight
-      ) * 0.55
-
-    if (
-      topLeft.distance >
-        maxCornerDistance ||
-      topRight.distance >
-        maxCornerDistance ||
-      bottomLeft.distance >
-        maxCornerDistance ||
-      bottomRight.distance >
-        maxCornerDistance
-    ) {
-      console.log(
-        "Jarak marker terlalu jauh:",
-        {
-          topLeft: topLeft.distance,
-          topRight: topRight.distance,
-          bottomLeft: bottomLeft.distance,
-          bottomRight: bottomRight.distance,
-        }
-      )
-
-      return {
-        detected: false,
-        message:
-          "Marker belum berada di posisi sudut LJK. Pastikan seluruh lembar terlihat.",
-      }
-    }
-
-    // =========================
-    // 11. CEK POSISI RELATIF
-    // =========================
+    // =========================================
+    // 8. CEK POSISI RELATIF (sanity check bentuk kotak)
+    // =========================================
 
     if (
       topLeft.x >= topRight.x ||
@@ -634,102 +396,39 @@ const detectAnswerSheet = (canvas) => {
       topLeft.y >= bottomLeft.y ||
       topRight.y >= bottomRight.y
     ) {
-      console.log(
-        "Susunan marker tidak valid:",
-        {
-          topLeft,
-          topRight,
-          bottomLeft,
-          bottomRight,
-        }
-      )
+      console.log("Susunan marker tidak valid:", {
+        topLeft, topRight, bottomLeft, bottomRight,
+      })
 
       return {
         detected: false,
-        message:
-          "Posisi 4 marker belum membentuk sudut LJK dengan benar.",
+        message: "Posisi 4 marker belum membentuk sudut LJK dengan benar. Coba foto lebih lurus/rata.",
       }
     }
 
-    // =========================
-    // 12. BUAT HASIL MARKER
-    // =========================
-
     const markers = {
-      topLeft: {
-        x: topLeft.x,
-        y: topLeft.y,
-      },
-
-      topRight: {
-        x: topRight.x,
-        y: topRight.y,
-      },
-
-      bottomLeft: {
-        x: bottomLeft.x,
-        y: bottomLeft.y,
-      },
-
-      bottomRight: {
-        x: bottomRight.x,
-        y: bottomRight.y,
-      },
+      topLeft: { x: topLeft.x, y: topLeft.y },
+      topRight: { x: topRight.x, y: topRight.y },
+      bottomLeft: { x: bottomLeft.x, y: bottomLeft.y },
+      bottomRight: { x: bottomRight.x, y: bottomRight.y },
     }
 
-    console.log(
-      "================================"
-    )
-
-    console.log(
-      "4 MARKER BERHASIL TERDETEKSI"
-    )
-
-    console.log(
-      "TOP LEFT:",
-      markers.topLeft
-    )
-
-    console.log(
-      "TOP RIGHT:",
-      markers.topRight
-    )
-
-    console.log(
-      "BOTTOM LEFT:",
-      markers.bottomLeft
-    )
-
-    console.log(
-      "BOTTOM RIGHT:",
-      markers.bottomRight
-    )
-
-    console.log(
-      "================================"
-    )
+    console.log("================================")
+    console.log("4 MARKER BERHASIL TERDETEKSI")
+    console.log("TOP LEFT:", markers.topLeft)
+    console.log("TOP RIGHT:", markers.topRight)
+    console.log("BOTTOM LEFT:", markers.bottomLeft)
+    console.log("BOTTOM RIGHT:", markers.bottomRight)
+    console.log("================================")
 
     return {
       detected: true,
-
-      message:
-        "4 marker hitam berhasil ditemukan! ✅",
-
+      message: "4 marker hitam berhasil ditemukan! ✅",
       markers,
     }
-
   } catch (error) {
-    console.error(
-      "ERROR DETEKSI MARKER:",
-      error
-    )
-
-    return {
-      detected: false,
-      message:
-        "Gagal mendeteksi marker LJK.",
-    }
-
+    console.error("ERROR DETEKSI MARKER:", error)
+    return { detected: false, message: "Gagal mendeteksi marker LJK." }
   } finally {
     if (src) src.delete()
     if (gray) gray.delete()
