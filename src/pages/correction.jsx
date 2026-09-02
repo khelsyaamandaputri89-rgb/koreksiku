@@ -14,6 +14,7 @@ function correction() {
 
   const [studentAnswers, setStudentAnswers] = useState({})
   const [correctionResult, setCorrectionResult] = useState(null)
+  const [studentName, setStudentName] = useState("")
 
   useEffect(() => {
     fetchExams()
@@ -131,6 +132,11 @@ function correction() {
 
       if (!selectedExam) {
         setMessage("Silakan pilih ujian terlebih dahulu.")
+        return
+      }
+
+      if (!studentName.trim()) {
+        setMessage("Silakan masukkan nama siswa terlebih dahulu.")
         return
       }
 
@@ -816,9 +822,60 @@ function correction() {
     if (binary) binary.delete()
   }
 }
-  // =========================
-  // SCAN
-  // =========================
+  
+  const saveCorrectionResult = async (result, answers, answerKeys) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      console.error("User belum login")
+      return false
+    }
+
+    // Simpan hasil koreksi utama
+    const { data: correctionData, error: correctionError } = await supabase
+      .from("correction_results")
+      .insert([
+        {
+          user_id: user.id,
+          question_id: selectedExam,
+          student_name: studentName.trim(),
+          total_questions: result.total,
+          correct_answers: result.correct,
+          wrong_answers: result.wrong,
+          score: result.score,
+        },
+      ])
+      .select()
+      .single()
+
+    if (correctionError) {
+      console.error("Error menyimpan hasil koreksi:", correctionError)
+      return false
+    }
+
+    // Siapkan jawaban siswa per nomor
+    const studentAnswersData = answerKeys.map((key) => ({
+      correction_result_id: correctionData.id,
+      question_number: key.question_number,
+      answer: answers[key.question_number] || "",
+      is_correct:
+        answers[key.question_number] === key.answer,
+    }))
+
+    // Simpan jawaban siswa
+    const { error: answersError } = await supabase
+      .from("student_answers")
+      .insert(studentAnswersData)
+
+    if (answersError) {
+      console.error("Error menyimpan jawaban siswa:", answersError)
+      return false
+    }
+
+    return true
+  }
 
   const handleScan = async () => {
     if (!videoRef.current) return
@@ -945,15 +1002,24 @@ function correction() {
       )
 
       // Hitung hasil
-      const resultCorrection =
-        calculateResult(
-          detectedAnswers,
-          answerKeys
-        )
-
-      setCorrectionResult(
-        resultCorrection
+      const resultCorrection = calculateResult(
+        detectedAnswers,
+        answerKeys
       )
+
+      setCorrectionResult(resultCorrection)
+
+      const saved = await saveCorrectionResult(
+        resultCorrection,
+        detectedAnswers,
+        answerKeys
+      )
+
+      if (saved) {
+        setMessage("Koreksi selesai dan hasil berhasil disimpan! 🎉")
+      } else {
+        setMessage("Koreksi selesai, tetapi hasil gagal disimpan.")
+      }
 
       setMessage(
         "Koreksi selesai! 🎉"
@@ -1019,6 +1085,20 @@ function correction() {
               </option>
             ))}
           </select>
+
+          <div className="mt-5">
+            <label className="mb-2 block font-semibold text-slate-700">
+              Nama Siswa
+            </label>
+
+            <input
+              type="text"
+              value={studentName}
+              onChange={(e) => setStudentName(e.target.value)}
+              placeholder="Masukkan nama siswa"
+              className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-slate-500"
+            />
+          </div>
 
         </div>
 
@@ -1088,7 +1168,7 @@ function correction() {
 
                 <button
                   onClick={startCamera}
-                  disabled={!selectedExam}
+                  disabled={!selectedExam || !studentName.trim()}
                   className="mt-6 rounded-xl bg-white px-6 py-3 font-semibold text-slate-800 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   📷 Buka Scanner
@@ -1138,6 +1218,13 @@ function correction() {
               </h2>
 
               <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
+
+                <p className="mt-2 text-gray-500">
+                  Nama Siswa:{" "}
+                  <span className="font-semibold text-slate-800">
+                    {studentName}
+                  </span>
+                </p>
 
                 <div className="rounded-xl bg-blue-50 p-5 text-center">
                   <p className="text-sm text-gray-500">
