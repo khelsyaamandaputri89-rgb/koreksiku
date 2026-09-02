@@ -1006,6 +1006,16 @@ function correction() {
         detection
       )
 
+      if (detection.detected) {
+        setMessage(
+        `Marker terdeteksi:
+          TL(${Math.round(detection.markers.topLeft.x)}, ${Math.round(detection.markers.topLeft.y)})
+          TR(${Math.round(detection.markers.topRight.x)}, ${Math.round(detection.markers.topRight.y)})
+          BL(${Math.round(detection.markers.bottomLeft.x)}, ${Math.round(detection.markers.bottomLeft.y)})
+          BR(${Math.round(detection.markers.bottomRight.x)}, ${Math.round(detection.markers.bottomRight.y)})`
+        )
+      }
+
       if (!detection.detected) {
         setMessage(detection.message)
 
