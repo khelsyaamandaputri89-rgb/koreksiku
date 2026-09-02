@@ -228,253 +228,460 @@ function correction() {
   // DETEKSI 4 MARKER
   // =========================
 
-  const detectAnswerSheet = (canvas) => {
-    if (!window.cv || !window.cv.Mat) {
+  // =========================
+// DETEKSI 4 MARKER LJK
+// =========================
+
+const detectAnswerSheet = (canvas) => {
+  if (!window.cv || !window.cv.Mat) {
+    return {
+      detected: false,
+      message: "OpenCV belum siap.",
+    }
+  }
+
+  const cv = window.cv
+
+  let src = null
+  let gray = null
+  let binary = null
+  let contours = null
+  let hierarchy = null
+  let kernel = null
+
+  try {
+    src = cv.imread(canvas)
+
+    const imageWidth = src.cols
+    const imageHeight = src.rows
+
+    // =========================
+    // UBAH KE GRAYSCALE
+    // =========================
+
+    gray = new cv.Mat()
+
+    cv.cvtColor(
+      src,
+      gray,
+      cv.COLOR_RGBA2GRAY
+    )
+
+    // =========================
+    // THRESHOLD HITAM
+    // =========================
+
+    binary = new cv.Mat()
+
+    cv.threshold(
+      gray,
+      binary,
+      120,
+      255,
+      cv.THRESH_BINARY_INV
+    )
+
+    // =========================
+    // BERSIHKAN NOISE KECIL
+    // =========================
+
+    kernel = cv.getStructuringElement(
+      cv.MORPH_RECT,
+      new cv.Size(3, 3)
+    )
+
+    cv.morphologyEx(
+      binary,
+      binary,
+      cv.MORPH_CLOSE,
+      kernel
+    )
+
+    // =========================
+    // CARI CONTOUR
+    // =========================
+
+    contours = new cv.MatVector()
+    hierarchy = new cv.Mat()
+
+    cv.findContours(
+      binary,
+      contours,
+      hierarchy,
+      cv.RETR_EXTERNAL,
+      cv.CHAIN_APPROX_SIMPLE
+    )
+
+    const candidates = []
+
+    // =========================
+    // FILTER KANDIDAT
+    // =========================
+
+    for (
+      let i = 0;
+      i < contours.size();
+      i++
+    ) {
+      const contour = contours.get(i)
+
+      const area = cv.contourArea(contour)
+
+      /*
+        Marker harus cukup besar.
+
+        Sengaja dibuat lebih longgar
+        daripada kode sebelumnya.
+      */
+
+      if (
+        area < 300 ||
+        area > 100000
+      ) {
+        contour.delete()
+        continue
+      }
+
+      const rect =
+        cv.boundingRect(contour)
+
+      const width = rect.width
+      const height = rect.height
+
+      if (
+        width < 15 ||
+        height < 15
+      ) {
+        contour.delete()
+        continue
+      }
+
+      // =========================
+      // RASIO KOTAK
+      // =========================
+
+      const ratio =
+        width / height
+
+      if (
+        ratio < 0.65 ||
+        ratio > 1.5
+      ) {
+        contour.delete()
+        continue
+      }
+
+      // =========================
+      // RECTANGULARITY
+      // =========================
+
+      const rectArea =
+        width * height
+
+      const rectangularity =
+        area / rectArea
+
+      /*
+        Marker hitam biasanya
+        memenuhi sebagian besar
+        bounding box.
+      */
+
+      if (rectangularity < 0.55) {
+        contour.delete()
+        continue
+      }
+
+      // =========================
+      // TITIK TENGAH
+      // =========================
+
+      const centerX =
+        rect.x + width / 2
+
+      const centerY =
+        rect.y + height / 2
+
+      candidates.push({
+        x: centerX,
+        y: centerY,
+        width,
+        height,
+        area,
+        rectangularity,
+      })
+
+      contour.delete()
+    }
+
+    console.log(
+      "KANDIDAT MARKER:",
+      candidates
+    )
+
+    // =========================
+    // MINIMAL 4 MARKER
+    // =========================
+
+    if (candidates.length < 4) {
       return {
         detected: false,
-        message: "OpenCV belum siap.",
+        message:
+          `Marker terdeteksi ${candidates.length}/4. Pastikan 4 marker hitam terlihat jelas.`,
       }
     }
 
-    const cv = window.cv
+    // =========================
+    // BAGI GAMBAR MENJADI 4 AREA
+    // =========================
 
-    let src = null
-    let gray = null
-    let binary = null
-    let contours = null
-    let hierarchy = null
+    const centerX =
+      imageWidth / 2
 
-    try {
-      src = cv.imread(canvas)
+    const centerY =
+      imageHeight / 2
 
-      gray = new cv.Mat()
-
-      cv.cvtColor(
-        src,
-        gray,
-        cv.COLOR_RGBA2GRAY
+    const topLeftCandidates =
+      candidates.filter(
+        (marker) =>
+          marker.x < centerX &&
+          marker.y < centerY
       )
 
-      /*
-        Cari objek yang benar-benar gelap
-      */
-
-      binary = new cv.Mat()
-
-      cv.threshold(
-        gray,
-        binary,
-        100,
-        255,
-        cv.THRESH_BINARY_INV
+    const topRightCandidates =
+      candidates.filter(
+        (marker) =>
+          marker.x >= centerX &&
+          marker.y < centerY
       )
 
-      contours = new cv.MatVector()
-      hierarchy = new cv.Mat()
-
-      cv.findContours(
-        binary,
-        contours,
-        hierarchy,
-        cv.RETR_LIST,
-        cv.CHAIN_APPROX_SIMPLE
+    const bottomLeftCandidates =
+      candidates.filter(
+        (marker) =>
+          marker.x < centerX &&
+          marker.y >= centerY
       )
 
-      const candidates = []
+    const bottomRightCandidates =
+      candidates.filter(
+        (marker) =>
+          marker.x >= centerX &&
+          marker.y >= centerY
+      )
 
-      for (let i = 0; i < contours.size(); i++) {
-        const contour = contours.get(i)
+    console.log(
+      "TL candidates:",
+      topLeftCandidates
+    )
 
-        const area = cv.contourArea(contour)
+    console.log(
+      "TR candidates:",
+      topRightCandidates
+    )
 
-        /*
-          Ukuran marker
-        */
+    console.log(
+      "BL candidates:",
+      bottomLeftCandidates
+    )
 
-        if (area < 200 || area > 20000) {
-          contour.delete()
-          continue
+    console.log(
+      "BR candidates:",
+      bottomRightCandidates
+    )
+
+    // =========================
+    // FUNGSI PILIH MARKER TERBAIK
+    // =========================
+
+    const chooseBest = (
+      list,
+      targetX,
+      targetY
+    ) => {
+      if (list.length === 0) {
+        return null
+      }
+
+      return list.reduce(
+        (best, current) => {
+          const bestDistance =
+            Math.hypot(
+              best.x - targetX,
+              best.y - targetY
+            )
+
+          const currentDistance =
+            Math.hypot(
+              current.x - targetX,
+              current.y - targetY
+            )
+
+          return currentDistance <
+            bestDistance
+            ? current
+            : best
         }
+      )
+    }
 
-        const rect = cv.boundingRect(contour)
+    // =========================
+    // CARI 4 MARKER
+    // =========================
 
-        const width = rect.width
-        const height = rect.height
+    const topLeft =
+      chooseBest(
+        topLeftCandidates,
+        0,
+        0
+      )
 
-        if (width < 10 || height < 10) {
-          contour.delete()
-          continue
-        }
+    const topRight =
+      chooseBest(
+        topRightCandidates,
+        imageWidth,
+        0
+      )
 
-        /*
-          Marker biasanya mendekati kotak.
-        */
+    const bottomLeft =
+      chooseBest(
+        bottomLeftCandidates,
+        0,
+        imageHeight
+      )
 
-        const ratio = width / height
+    const bottomRight =
+      chooseBest(
+        bottomRightCandidates,
+        imageWidth,
+        imageHeight
+      )
 
-        if (ratio < 0.5 || ratio > 2) {
-          contour.delete()
-          continue
-        }
+    // =========================
+    // CEK LENGKAP
+    // =========================
 
-        /*
-          Cek bentuk kotak menggunakan contour.
-        */
+    if (
+      !topLeft ||
+      !topRight ||
+      !bottomLeft ||
+      !bottomRight
+    ) {
+      return {
+        detected: false,
+        message:
+          "Belum berhasil menemukan 4 marker. Pastikan seluruh sudut LJK terlihat di kamera.",
+      }
+    }
 
-        const perimeter =
-          cv.arcLength(contour, true)
+    // =========================
+    // CEK JARAK ANTAR MARKER
+    // =========================
 
-        const approx = new cv.Mat()
+    const markers = [
+      topLeft,
+      topRight,
+      bottomLeft,
+      bottomRight,
+    ]
 
-        cv.approxPolyDP(
-          contour,
-          approx,
-          0.04 * perimeter,
-          true
+    const distances = []
+
+    for (
+      let i = 0;
+      i < markers.length;
+      i++
+    ) {
+      for (
+        let j = i + 1;
+        j < markers.length;
+        j++
+      ) {
+        distances.push(
+          Math.hypot(
+            markers[i].x -
+              markers[j].x,
+            markers[i].y -
+              markers[j].y
+          )
         )
-
-        if (approx.rows >= 4 && approx.rows <= 6) {
-          candidates.push({
-            x: rect.x + rect.width / 2,
-            y: rect.y + rect.height / 2,
-            width,
-            height,
-            area,
-          })
-        }
-
-        approx.delete()
-        contour.delete()
       }
+    }
 
+    const maxDistance =
+      Math.max(...distances)
+
+    const minDistance =
+      Math.min(...distances)
+
+    /*
+      Kalau semua marker ternyata
+      berada terlalu berdekatan,
+      berarti bukan 4 sudut LJK.
+    */
+
+    if (
+      maxDistance < imageWidth * 0.25 ||
+      minDistance < 20
+    ) {
       console.log(
-        "KANDIDAT MARKER:",
-        candidates
+        "Marker terlalu berdekatan:",
+        markers
       )
 
-      /*
-        Minimal harus ada 4 kandidat
-      */
-
-      if (candidates.length < 4) {
-        return {
-          detected: false,
-          message:
-            `Marker hitam terdeteksi ${candidates.length}/4. Pastikan 4 marker terlihat jelas.`,
-        }
+      return {
+        detected: false,
+        message:
+          "Marker ditemukan tetapi posisinya tidak membentuk 4 sudut LJK.",
       }
+    }
 
-      /*
-        Ambil kandidat berdasarkan posisi ekstrem.
-        
-        Tidak menggunakan batas 50% lagi.
-      */
+    // =========================
+    // HASIL
+    // =========================
 
-      const topLeft = candidates.reduce(
-        (best, current) =>
-          current.x + current.y <
-          best.x + best.y
-            ? current
-            : best
-      )
-
-      const topRight = candidates.reduce(
-        (best, current) =>
-          current.x - current.y >
-          best.x - best.y
-            ? current
-            : best
-      )
-
-      const bottomLeft = candidates.reduce(
-        (best, current) =>
-          current.x - current.y <
-          best.x - best.y
-            ? current
-            : best
-      )
-
-      const bottomRight = candidates.reduce(
-        (best, current) =>
-          current.x + current.y >
-          best.x + best.y
-            ? current
-            : best
-      )
-
-      /*
-        Pastikan 4 marker berbeda.
-      */
-
-      const selected = [
+    console.log(
+      "✅ 4 MARKER BERHASIL TERDETEKSI:",
+      {
         topLeft,
         topRight,
         bottomLeft,
         bottomRight,
-      ]
-
-      const unique = new Set(
-        selected.map(
-          (marker) =>
-            `${Math.round(marker.x)}-${Math.round(marker.y)}`
-        )
-      )
-
-      if (unique.size < 4) {
-        console.log(
-          "Marker yang ditemukan belum membentuk 4 sudut:",
-          selected
-        )
-
-        return {
-          detected: false,
-          message:
-            "4 marker belum dapat dipisahkan dengan jelas. Coba posisikan LJK lebih lurus.",
-        }
       }
+    )
 
-      console.log(
-        "4 MARKER TERDETEKSI:",
-        {
-          topLeft,
-          topRight,
-          bottomLeft,
-          bottomRight,
-        }
-      )
-
-      return {
-        detected: true,
-        message:
-          "4 marker hitam berhasil ditemukan! ✅",
-        markers: {
-          topLeft,
-          topRight,
-          bottomLeft,
-          bottomRight,
-        },
-      }
-
-    } catch (error) {
-      console.error(
-        "Error deteksi marker:",
-        error
-      )
-
-      return {
-        detected: false,
-        message:
-          "Gagal mendeteksi marker LJK.",
-      }
-
-    } finally {
-      if (src) src.delete()
-      if (gray) gray.delete()
-      if (binary) binary.delete()
-      if (contours) contours.delete()
-      if (hierarchy) hierarchy.delete()
+    return {
+      detected: true,
+      message:
+        "4 marker hitam berhasil ditemukan! ✅",
+      markers: {
+        topLeft,
+        topRight,
+        bottomLeft,
+        bottomRight,
+      },
     }
+
+  } catch (error) {
+    console.error(
+      "Error deteksi marker:",
+      error
+    )
+
+    return {
+      detected: false,
+      message:
+        "Gagal mendeteksi marker LJK.",
+    }
+
+  } finally {
+    if (src) src.delete()
+    if (gray) gray.delete()
+    if (binary) binary.delete()
+    if (contours) contours.delete()
+    if (hierarchy) hierarchy.delete()
+    if (kernel) kernel.delete()
   }
+}
   // =========================
   // LURUSKAN FOTO LJK
   // =========================
