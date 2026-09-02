@@ -756,6 +756,13 @@ const warpAnswerSheet = (canvas, markers) => {
     src = cv.imread(canvas)
 
     // ==========================================
+    // UKURAN HASIL AKHIR
+    // ==========================================
+
+    const width = 900
+    const height = 1200
+
+    // ==========================================
     // AMBIL 4 MARKER
     // ==========================================
 
@@ -764,66 +771,108 @@ const warpAnswerSheet = (canvas, markers) => {
         x: Number(markers.topLeft.x),
         y: Number(markers.topLeft.y),
       },
+
       {
         x: Number(markers.topRight.x),
         y: Number(markers.topRight.y),
       },
-      {
-        x: Number(markers.bottomLeft.x),
-        y: Number(markers.bottomLeft.y),
-      },
+
       {
         x: Number(markers.bottomRight.x),
         y: Number(markers.bottomRight.y),
       },
+
+      {
+        x: Number(markers.bottomLeft.x),
+        y: Number(markers.bottomLeft.y),
+      },
     ]
 
     console.log(
-      "MARKER DARI DETECTOR:",
+      "================================="
+    )
+
+    console.log(
+      "MARKER UNTUK WARP:",
       points
     )
 
     // ==========================================
-    // URUTKAN 4 TITIK DENGAN CARA LEBIH AMAN
+    // URUTKAN BERDASARKAN GEOMETRI
     // ==========================================
 
-    const sum = (p) => p.x + p.y
-    const diff = (p) => p.x - p.y
+    const centerX =
+      points.reduce(
+        (sum, p) => sum + p.x,
+        0
+      ) / points.length
 
-    // kiri atas = x+y paling kecil
-    const topLeft = points.reduce(
-      (best, p) =>
-        sum(p) < sum(best)
-          ? p
-          : best
-    )
+    const centerY =
+      points.reduce(
+        (sum, p) => sum + p.y,
+        0
+      ) / points.length
 
-    // kanan bawah = x+y paling besar
-    const bottomRight = points.reduce(
-      (best, p) =>
-        sum(p) > sum(best)
-          ? p
-          : best
-    )
+    const ordered = [
+      ...points,
+    ].sort((a, b) => {
+      const angleA =
+        Math.atan2(
+          a.y - centerY,
+          a.x - centerX
+        )
 
-    // kanan atas = x-y paling besar
-    const topRight = points.reduce(
-      (best, p) =>
-        diff(p) > diff(best)
-          ? p
-          : best
-    )
+      const angleB =
+        Math.atan2(
+          b.y - centerY,
+          b.x - centerX
+        )
 
-    // kiri bawah = x-y paling kecil
-    const bottomLeft = points.reduce(
-      (best, p) =>
-        diff(p) < diff(best)
-          ? p
-          : best
-    )
+      return angleA - angleB
+    })
+
+    // ==========================================
+    // CARI TITIK EKSTREM
+    // ==========================================
+
+    const topLeft =
+      ordered.reduce(
+        (best, p) =>
+          p.x + p.y <
+          best.x + best.y
+            ? p
+            : best
+      )
+
+    const bottomRight =
+      ordered.reduce(
+        (best, p) =>
+          p.x + p.y >
+          best.x + best.y
+            ? p
+            : best
+      )
+
+    const topRight =
+      ordered.reduce(
+        (best, p) =>
+          p.x - p.y >
+          best.x - best.y
+            ? p
+            : best
+      )
+
+    const bottomLeft =
+      ordered.reduce(
+        (best, p) =>
+          p.x - p.y <
+          best.x - best.y
+            ? p
+            : best
+      )
 
     console.log(
-      "URUTAN MARKER FINAL:",
+      "MARKER TERURUT:",
       {
         topLeft,
         topRight,
@@ -833,102 +882,33 @@ const warpAnswerSheet = (canvas, markers) => {
     )
 
     // ==========================================
-    // PASTIKAN 4 TITIK BERBEDA
+    // CEK DUPLIKAT
     // ==========================================
 
-    const unique = new Set([
-      `${topLeft.x},${topLeft.y}`,
-      `${topRight.x},${topRight.y}`,
-      `${bottomRight.x},${bottomRight.y}`,
-      `${bottomLeft.x},${bottomLeft.y}`,
-    ])
+    const ids = [
+      topLeft,
+      topRight,
+      bottomRight,
+      bottomLeft,
+    ].map(
+      (p) =>
+        `${Math.round(p.x)}-${Math.round(p.y)}`
+    )
 
-    if (unique.size !== 4) {
+    if (
+      new Set(ids).size !== 4
+    ) {
       console.error(
-        "Marker yang dipakai tidak unik:",
-        points
+        "Marker tidak unik:",
+        ids
       )
 
       return null
     }
 
     // ==========================================
-    // HITUNG UKURAN LJK DARI MARKER
-    // ==========================================
-
-    const distance = (p1, p2) => {
-      const dx = p1.x - p2.x
-      const dy = p1.y - p2.y
-
-      return Math.sqrt(
-        dx * dx +
-        dy * dy
-      )
-    }
-
-    const topWidth = distance(
-      topLeft,
-      topRight
-    )
-
-    const bottomWidth = distance(
-      bottomLeft,
-      bottomRight
-    )
-
-    const leftHeight = distance(
-      topLeft,
-      bottomLeft
-    )
-
-    const rightHeight = distance(
-      topRight,
-      bottomRight
-    )
-
-    const sheetWidth =
-      (topWidth + bottomWidth) / 2
-
-    const sheetHeight =
-      (leftHeight + rightHeight) / 2
-
-    console.log(
-      "UKURAN LJK TERDETEKSI:",
-      {
-        sheetWidth,
-        sheetHeight,
-      }
-    )
-
-    // ==========================================
-    // UKURAN OUTPUT
-    //
-    // Rasio dibuat mengikuti LJK yang dipindai,
-    // bukan dipaksa 900x1200.
-    // ==========================================
-
-    const outputWidth = 900
-
-    const aspectRatio =
-      sheetHeight / sheetWidth
-
-    const outputHeight =
-      Math.round(
-        outputWidth * aspectRatio
-      )
-
-    console.log(
-      "UKURAN OUTPUT:",
-      {
-        outputWidth,
-        outputHeight,
-      }
-    )
-
-    // ==========================================
     // TITIK SUMBER
     //
-    // URUTAN:
     // TL → TR → BR → BL
     // ==========================================
 
@@ -946,11 +926,6 @@ const warpAnswerSheet = (canvas, markers) => {
       bottomLeft.y,
     ]
 
-    console.log(
-      "TITIK WARP FINAL:",
-      srcPoints
-    )
-
     // ==========================================
     // TITIK TUJUAN
     // ==========================================
@@ -959,15 +934,29 @@ const warpAnswerSheet = (canvas, markers) => {
       0,
       0,
 
-      outputWidth - 1,
+      width - 1,
       0,
 
-      outputWidth - 1,
-      outputHeight - 1,
+      width - 1,
+      height - 1,
 
       0,
-      outputHeight - 1,
+      height - 1,
     ]
+
+    console.log(
+      "SOURCE POINTS:",
+      srcPoints
+    )
+
+    console.log(
+      "DESTINATION POINTS:",
+      dstPoints
+    )
+
+    // ==========================================
+    // MAT
+    // ==========================================
 
     srcTri = cv.matFromArray(
       4,
@@ -984,7 +973,7 @@ const warpAnswerSheet = (canvas, markers) => {
     )
 
     // ==========================================
-    // PERSPECTIVE TRANSFORM
+    // PERSPECTIVE MATRIX
     // ==========================================
 
     matrix =
@@ -993,13 +982,24 @@ const warpAnswerSheet = (canvas, markers) => {
         dstTri
       )
 
+    console.log(
+      "PERSPECTIVE MATRIX:",
+      matrix
+    )
+
+    // ==========================================
+    // WARP
+    // ==========================================
+
+    dst = new cv.Mat()
+
     cv.warpPerspective(
       src,
       dst,
       matrix,
       new cv.Size(
-        outputWidth,
-        outputHeight
+        width,
+        height
       ),
       cv.INTER_CUBIC,
       cv.BORDER_CONSTANT,
@@ -1021,10 +1021,10 @@ const warpAnswerSheet = (canvas, markers) => {
       )
 
     resultCanvas.width =
-      outputWidth
+      width
 
     resultCanvas.height =
-      outputHeight
+      height
 
     cv.imshow(
       resultCanvas,
@@ -1032,17 +1032,21 @@ const warpAnswerSheet = (canvas, markers) => {
     )
 
     console.log(
-      "WARP BERHASIL:",
-      outputWidth,
+      "WARP SELESAI:",
+      width,
       "x",
-      outputHeight
+      height
+    )
+
+    console.log(
+      "================================="
     )
 
     return resultCanvas
 
   } catch (error) {
     console.error(
-      "ERROR WARP LJK:",
+      "ERROR WARP:",
       error
     )
 
