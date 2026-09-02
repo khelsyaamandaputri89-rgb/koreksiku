@@ -743,7 +743,7 @@ const detectAnswerSheet = (canvas) => {
   // LURUSKAN FOTO LJK
   // =========================
 
-  const warpAnswerSheet = (canvas, markers) => {
+const warpAnswerSheet = (canvas, markers) => {
   const cv = window.cv
 
   let src = null
@@ -755,70 +755,75 @@ const detectAnswerSheet = (canvas) => {
   try {
     src = cv.imread(canvas)
 
-    const width = 900
-    const height = 1200
-
-    dst = new cv.Mat()
-
     // ==========================================
-    // AMBIL 4 TITIK MARKER
+    // AMBIL 4 MARKER
     // ==========================================
 
     const points = [
       {
-        x: markers.topLeft.x,
-        y: markers.topLeft.y,
+        x: Number(markers.topLeft.x),
+        y: Number(markers.topLeft.y),
       },
       {
-        x: markers.topRight.x,
-        y: markers.topRight.y,
+        x: Number(markers.topRight.x),
+        y: Number(markers.topRight.y),
       },
       {
-        x: markers.bottomLeft.x,
-        y: markers.bottomLeft.y,
+        x: Number(markers.bottomLeft.x),
+        y: Number(markers.bottomLeft.y),
       },
       {
-        x: markers.bottomRight.x,
-        y: markers.bottomRight.y,
+        x: Number(markers.bottomRight.x),
+        y: Number(markers.bottomRight.y),
       },
     ]
 
     console.log(
-      "MARKER SEBELUM DIURUTKAN:",
+      "MARKER DARI DETECTOR:",
       points
     )
 
     // ==========================================
-    // URUTKAN BERDASARKAN POSISI
+    // URUTKAN 4 TITIK DENGAN CARA LEBIH AMAN
     // ==========================================
 
-    const sortedByY = [...points].sort(
-      (a, b) => a.y - b.y
+    const sum = (p) => p.x + p.y
+    const diff = (p) => p.x - p.y
+
+    // kiri atas = x+y paling kecil
+    const topLeft = points.reduce(
+      (best, p) =>
+        sum(p) < sum(best)
+          ? p
+          : best
     )
 
-    const topPoints =
-      sortedByY.slice(0, 2)
-
-    const bottomPoints =
-      sortedByY.slice(2, 4)
-
-    // kiri → kanan
-    topPoints.sort(
-      (a, b) => a.x - b.x
+    // kanan bawah = x+y paling besar
+    const bottomRight = points.reduce(
+      (best, p) =>
+        sum(p) > sum(best)
+          ? p
+          : best
     )
 
-    bottomPoints.sort(
-      (a, b) => a.x - b.x
+    // kanan atas = x-y paling besar
+    const topRight = points.reduce(
+      (best, p) =>
+        diff(p) > diff(best)
+          ? p
+          : best
     )
 
-    const topLeft = topPoints[0]
-    const topRight = topPoints[1]
-
-    const bottomLeft = bottomPoints[0]
-    const bottomRight = bottomPoints[1]
+    // kiri bawah = x-y paling kecil
+    const bottomLeft = points.reduce(
+      (best, p) =>
+        diff(p) < diff(best)
+          ? p
+          : best
+    )
 
     console.log(
-      "MARKER SETELAH DIURUTKAN:",
+      "URUTAN MARKER FINAL:",
       {
         topLeft,
         topRight,
@@ -828,25 +833,102 @@ const detectAnswerSheet = (canvas) => {
     )
 
     // ==========================================
-    // VALIDASI
+    // PASTIKAN 4 TITIK BERBEDA
     // ==========================================
 
-    if (
-      !topLeft ||
-      !topRight ||
-      !bottomLeft ||
-      !bottomRight
-    ) {
+    const unique = new Set([
+      `${topLeft.x},${topLeft.y}`,
+      `${topRight.x},${topRight.y}`,
+      `${bottomRight.x},${bottomRight.y}`,
+      `${bottomLeft.x},${bottomLeft.y}`,
+    ])
+
+    if (unique.size !== 4) {
       console.error(
-        "4 titik marker tidak lengkap"
+        "Marker yang dipakai tidak unik:",
+        points
       )
 
       return null
     }
 
     // ==========================================
+    // HITUNG UKURAN LJK DARI MARKER
+    // ==========================================
+
+    const distance = (p1, p2) => {
+      const dx = p1.x - p2.x
+      const dy = p1.y - p2.y
+
+      return Math.sqrt(
+        dx * dx +
+        dy * dy
+      )
+    }
+
+    const topWidth = distance(
+      topLeft,
+      topRight
+    )
+
+    const bottomWidth = distance(
+      bottomLeft,
+      bottomRight
+    )
+
+    const leftHeight = distance(
+      topLeft,
+      bottomLeft
+    )
+
+    const rightHeight = distance(
+      topRight,
+      bottomRight
+    )
+
+    const sheetWidth =
+      (topWidth + bottomWidth) / 2
+
+    const sheetHeight =
+      (leftHeight + rightHeight) / 2
+
+    console.log(
+      "UKURAN LJK TERDETEKSI:",
+      {
+        sheetWidth,
+        sheetHeight,
+      }
+    )
+
+    // ==========================================
+    // UKURAN OUTPUT
+    //
+    // Rasio dibuat mengikuti LJK yang dipindai,
+    // bukan dipaksa 900x1200.
+    // ==========================================
+
+    const outputWidth = 900
+
+    const aspectRatio =
+      sheetHeight / sheetWidth
+
+    const outputHeight =
+      Math.round(
+        outputWidth * aspectRatio
+      )
+
+    console.log(
+      "UKURAN OUTPUT:",
+      {
+        outputWidth,
+        outputHeight,
+      }
+    )
+
+    // ==========================================
     // TITIK SUMBER
-    // URUTAN WAJIB:
+    //
+    // URUTAN:
     // TL → TR → BR → BL
     // ==========================================
 
@@ -877,14 +959,14 @@ const detectAnswerSheet = (canvas) => {
       0,
       0,
 
-      width - 1,
+      outputWidth - 1,
       0,
 
-      width - 1,
-      height - 1,
+      outputWidth - 1,
+      outputHeight - 1,
 
       0,
-      height - 1,
+      outputHeight - 1,
     ]
 
     srcTri = cv.matFromArray(
@@ -916,10 +998,10 @@ const detectAnswerSheet = (canvas) => {
       dst,
       matrix,
       new cv.Size(
-        width,
-        height
+        outputWidth,
+        outputHeight
       ),
-      cv.INTER_LINEAR,
+      cv.INTER_CUBIC,
       cv.BORDER_CONSTANT,
       new cv.Scalar(
         255,
@@ -930,7 +1012,7 @@ const detectAnswerSheet = (canvas) => {
     )
 
     // ==========================================
-    // BUAT CANVAS HASIL
+    // CANVAS HASIL
     // ==========================================
 
     const resultCanvas =
@@ -938,19 +1020,29 @@ const detectAnswerSheet = (canvas) => {
         "canvas"
       )
 
-    resultCanvas.width = width
-    resultCanvas.height = height
+    resultCanvas.width =
+      outputWidth
+
+    resultCanvas.height =
+      outputHeight
 
     cv.imshow(
       resultCanvas,
       dst
     )
 
+    console.log(
+      "WARP BERHASIL:",
+      outputWidth,
+      "x",
+      outputHeight
+    )
+
     return resultCanvas
 
   } catch (error) {
     console.error(
-      "Error meluruskan LJK:",
+      "ERROR WARP LJK:",
       error
     )
 
