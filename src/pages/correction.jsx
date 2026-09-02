@@ -1064,7 +1064,7 @@ const warpAnswerSheet = (canvas, markers) => {
   // BACA JAWABAN DINAMIS
   // =========================
 
-  const readStudentAnswers = (
+ const readStudentAnswers = (
   canvas,
   totalQuestions
 ) => {
@@ -1096,20 +1096,16 @@ const warpAnswerSheet = (canvas, markers) => {
       binary,
       0,
       255,
-      cv.THRESH_BINARY_INV +
-        cv.THRESH_OTSU
+      cv.THRESH_BINARY_INV + cv.THRESH_OTSU
     )
 
     const answers = {}
 
     /*
-      LAYOUT LJK
-
-      Ukuran hasil warp:
+      ==========================
+      LAYOUT HASIL WARP
+      ==========================
       900 x 1200
-
-      Area jawaban berada
-      di bagian atas kertas.
     */
 
     const columns = 2
@@ -1118,33 +1114,34 @@ const warpAnswerSheet = (canvas, markers) => {
       Math.ceil(totalQuestions / columns)
 
     /*
-      POSISI AREA JAWABAN
+      ==========================
+      POSISI SOAL
+      ==========================
     */
 
     const startY = 245
     const endY = 470
-
-    /*
-      KOLOM KIRI DAN KANAN
-    */
-
-    const leftColumnStartX = 170
-    const rightColumnStartX = 490
-
-    /*
-      JARAK ANTAR BARIS
-    */
 
     const rowHeight =
       (endY - startY) /
       questionsPerColumn
 
     /*
-      JARAK BUBBLE A-E
+      ==========================
+      POSISI KOLOM
+      ==========================
+    */
+
+    const leftColumnStartX = 170
+    const rightColumnStartX = 490
+
+    /*
+      ==========================
+      UKURAN BUBBLE
+      ==========================
     */
 
     const bubbleSize = 22
-
     const bubbleGap = 27
 
     const choices = [
@@ -1152,14 +1149,21 @@ const warpAnswerSheet = (canvas, markers) => {
       "B",
       "C",
       "D",
-      "E",
+      "E"
     ]
+
+    /*
+      ==========================
+      LOOP SOAL
+      ==========================
+    */
 
     for (
       let questionIndex = 0;
       questionIndex < totalQuestions;
       questionIndex++
     ) {
+
       const questionNumber =
         questionIndex + 1
 
@@ -1173,36 +1177,32 @@ const warpAnswerSheet = (canvas, markers) => {
         questionIndex %
         questionsPerColumn
 
-      /*
-        Posisi Y setiap soal
-      */
-
       const rowY =
         startY +
         rowIndex * rowHeight
-
-      /*
-        Tentukan kolom kiri / kanan
-      */
 
       const columnStartX =
         columnIndex === 0
           ? leftColumnStartX
           : rightColumnStartX
 
-      let highestInk = 0
-      let secondHighestInk = 0
+      /*
+        Simpan nilai tinta setiap pilihan
+      */
 
-      let selectedAnswer = ""
+      const inkValues = []
+
+      /*
+        ==========================
+        BACA A - E
+        ==========================
+      */
 
       for (
         let choiceIndex = 0;
         choiceIndex < choices.length;
         choiceIndex++
       ) {
-        /*
-          Posisi bubble
-        */
 
         const bubbleX =
           columnStartX +
@@ -1212,14 +1212,11 @@ const warpAnswerSheet = (canvas, markers) => {
           rowY
 
         /*
-          Ambil bagian TENGAH bubble.
-
-          Jangan ambil garis lingkaran,
-          karena yang kita cari adalah
-          tinta di dalam bubble.
+          Ambil bagian tengah bubble.
+          Tidak mengambil garis lingkaran.
         */
 
-        const padding = 5
+        const padding = 7
 
         const roiX =
           Math.round(
@@ -1244,7 +1241,7 @@ const warpAnswerSheet = (canvas, markers) => {
           )
 
         /*
-          Pastikan tidak keluar gambar
+          Pastikan ROI aman
         */
 
         if (
@@ -1255,6 +1252,7 @@ const warpAnswerSheet = (canvas, markers) => {
           roiY + roiHeight >
             binary.rows
         ) {
+          inkValues.push(0)
           continue
         }
 
@@ -1272,52 +1270,108 @@ const warpAnswerSheet = (canvas, markers) => {
         const ink =
           cv.countNonZero(roi)
 
-        roi.delete()
+        const totalPixels =
+          roiWidth * roiHeight
+
+        const inkRatio =
+          ink / totalPixels
+
+        inkValues.push(inkRatio)
 
         console.log(
           `Soal ${questionNumber} - ${choices[choiceIndex]}:`,
-          ink
+          "ink =",
+          ink,
+          "ratio =",
+          inkRatio.toFixed(3)
         )
 
-        if (ink > highestInk) {
-          secondHighestInk =
-            highestInk
-
-          highestInk = ink
-
-          selectedAnswer =
-            choices[choiceIndex]
-        } else if (
-          ink > secondHighestInk
-        ) {
-          secondHighestInk = ink
-        }
+        roi.delete()
       }
 
       /*
-        Tentukan apakah benar-benar diisi
+        ==========================
+        CARI NILAI TERTINGGI
+        ==========================
       */
 
-      const minimumInk = 15
+      let highestIndex = 0
+      let secondHighest = 0
+
+      for (
+        let i = 0;
+        i < inkValues.length;
+        i++
+      ) {
+
+        if (
+          inkValues[i] >
+          inkValues[highestIndex]
+        ) {
+
+          secondHighest =
+            inkValues[highestIndex]
+
+          highestIndex = i
+
+        } else if (
+          inkValues[i] >
+          secondHighest
+        ) {
+
+          secondHighest =
+            inkValues[i]
+        }
+      }
+
+      const highestInk =
+        inkValues[highestIndex]
 
       /*
-        Kalau dua bubble hampir sama,
-        anggap kosong supaya tidak salah
-        memilih jawaban.
+        ==========================
+        TENTUKAN JAWABAN
+        ==========================
+      */
+
+      const selectedAnswer =
+        choices[highestIndex]
+
+      /*
+        Minimum tinta
+      */
+
+      const minimumInkRatio = 0.12
+
+      /*
+        Kalau pilihan kedua terlalu
+        dekat dengan pilihan tertinggi,
+        anggap ambigu.
       */
 
       const isAmbiguous =
-        secondHighestInk >
+        secondHighest >
         highestInk * 0.75
 
       if (
-        highestInk < minimumInk ||
+        highestInk <
+          minimumInkRatio ||
         isAmbiguous
       ) {
+
         answers[questionNumber] = ""
+
+        console.log(
+          `Soal ${questionNumber}: KOSONG / AMBIGU`
+        )
+
       } else {
+
         answers[questionNumber] =
           selectedAnswer
+
+        console.log(
+          `Soal ${questionNumber}: ${selectedAnswer}`
+        )
       }
     }
 
@@ -1329,6 +1383,7 @@ const warpAnswerSheet = (canvas, markers) => {
     return answers
 
   } catch (error) {
+
     console.error(
       "Error membaca jawaban:",
       error
@@ -1337,8 +1392,11 @@ const warpAnswerSheet = (canvas, markers) => {
     return {}
 
   } finally {
+
     if (src) src.delete()
+
     if (gray) gray.delete()
+
     if (binary) binary.delete()
   }
 }
