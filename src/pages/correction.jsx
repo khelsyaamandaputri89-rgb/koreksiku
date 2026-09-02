@@ -745,313 +745,50 @@ const detectAnswerSheet = (canvas) => {
 
 const warpAnswerSheet = (canvas, markers) => {
   const cv = window.cv
-
-  let src = null
-  let dst = null
-  let srcTri = null
-  let dstTri = null
-  let matrix = null
+  let src = null, dst = null, srcTri = null, dstTri = null, matrix = null
 
   try {
     src = cv.imread(canvas)
-
-    // ==========================================
-    // UKURAN HASIL AKHIR
-    // ==========================================
-
     const width = 900
     const height = 1200
 
-    // ==========================================
-    // AMBIL 4 MARKER
-    // ==========================================
-
-    const points = [
-      {
-        x: Number(markers.topLeft.x),
-        y: Number(markers.topLeft.y),
-      },
-
-      {
-        x: Number(markers.topRight.x),
-        y: Number(markers.topRight.y),
-      },
-
-      {
-        x: Number(markers.bottomRight.x),
-        y: Number(markers.bottomRight.y),
-      },
-
-      {
-        x: Number(markers.bottomLeft.x),
-        y: Number(markers.bottomLeft.y),
-      },
-    ]
-
-    console.log(
-      "================================="
-    )
-
-    console.log(
-      "MARKER UNTUK WARP:",
-      points
-    )
-
-    // ==========================================
-    // URUTKAN BERDASARKAN GEOMETRI
-    // ==========================================
-
-    const centerX =
-      points.reduce(
-        (sum, p) => sum + p.x,
-        0
-      ) / points.length
-
-    const centerY =
-      points.reduce(
-        (sum, p) => sum + p.y,
-        0
-      ) / points.length
-
-    const ordered = [
-      ...points,
-    ].sort((a, b) => {
-      const angleA =
-        Math.atan2(
-          a.y - centerY,
-          a.x - centerX
-        )
-
-      const angleB =
-        Math.atan2(
-          b.y - centerY,
-          b.x - centerX
-        )
-
-      return angleA - angleB
-    })
-
-    // ==========================================
-    // CARI TITIK EKSTREM
-    // ==========================================
-
-    const topLeft =
-      ordered.reduce(
-        (best, p) =>
-          p.x + p.y <
-          best.x + best.y
-            ? p
-            : best
-      )
-
-    const bottomRight =
-      ordered.reduce(
-        (best, p) =>
-          p.x + p.y >
-          best.x + best.y
-            ? p
-            : best
-      )
-
-    const topRight =
-      ordered.reduce(
-        (best, p) =>
-          p.x - p.y >
-          best.x - best.y
-            ? p
-            : best
-      )
-
-    const bottomLeft =
-      ordered.reduce(
-        (best, p) =>
-          p.x - p.y <
-          best.x - best.y
-            ? p
-            : best
-      )
-
-    console.log(
-      "MARKER TERURUT:",
-      {
-        topLeft,
-        topRight,
-        bottomRight,
-        bottomLeft,
-      }
-    )
-
-    // ==========================================
-    // CEK DUPLIKAT
-    // ==========================================
-
-    const ids = [
-      topLeft,
-      topRight,
-      bottomRight,
-      bottomLeft,
-    ].map(
-      (p) =>
-        `${Math.round(p.x)}-${Math.round(p.y)}`
-    )
-
-    if (
-      new Set(ids).size !== 4
-    ) {
-      console.error(
-        "Marker tidak unik:",
-        ids
-      )
-
-      return null
-    }
-
-    // ==========================================
-    // TITIK SUMBER
-    //
-    // TL → TR → BR → BL
-    // ==========================================
-
+    // Pakai langsung hasil dari detectAnswerSheet, jangan dihitung ulang
     const srcPoints = [
-      topLeft.x,
-      topLeft.y,
-
-      topRight.x,
-      topRight.y,
-
-      bottomRight.x,
-      bottomRight.y,
-
-      bottomLeft.x,
-      bottomLeft.y,
+      markers.topLeft.x, markers.topLeft.y,
+      markers.topRight.x, markers.topRight.y,
+      markers.bottomRight.x, markers.bottomRight.y,
+      markers.bottomLeft.x, markers.bottomLeft.y,
     ]
-
-    // ==========================================
-    // TITIK TUJUAN
-    // ==========================================
 
     const dstPoints = [
-      0,
-      0,
-
-      width - 1,
-      0,
-
-      width - 1,
-      height - 1,
-
-      0,
-      height - 1,
+      0, 0,
+      width - 1, 0,
+      width - 1, height - 1,
+      0, height - 1,
     ]
 
-    console.log(
-      "SOURCE POINTS:",
-      srcPoints
-    )
-
-    console.log(
-      "DESTINATION POINTS:",
-      dstPoints
-    )
-
-    // ==========================================
-    // MAT
-    // ==========================================
-
-    srcTri = cv.matFromArray(
-      4,
-      1,
-      cv.CV_32FC2,
-      srcPoints
-    )
-
-    dstTri = cv.matFromArray(
-      4,
-      1,
-      cv.CV_32FC2,
-      dstPoints
-    )
-
-    // ==========================================
-    // PERSPECTIVE MATRIX
-    // ==========================================
-
-    matrix =
-      cv.getPerspectiveTransform(
-        srcTri,
-        dstTri
-      )
-
-    console.log(
-      "PERSPECTIVE MATRIX:",
-      matrix
-    )
-
-    // ==========================================
-    // WARP
-    // ==========================================
+    srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, srcPoints)
+    dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, dstPoints)
+    matrix = cv.getPerspectiveTransform(srcTri, dstTri)
 
     dst = new cv.Mat()
-
     cv.warpPerspective(
-      src,
-      dst,
-      matrix,
-      new cv.Size(
-        width,
-        height
-      ),
+      src, dst, matrix,
+      new cv.Size(width, height),
       cv.INTER_CUBIC,
       cv.BORDER_CONSTANT,
-      new cv.Scalar(
-        255,
-        255,
-        255,
-        255
-      )
+      new cv.Scalar(255, 255, 255, 255)
     )
 
-    // ==========================================
-    // CANVAS HASIL
-    // ==========================================
-
-    const resultCanvas =
-      document.createElement(
-        "canvas"
-      )
-
-    resultCanvas.width =
-      width
-
-    resultCanvas.height =
-      height
-
-    cv.imshow(
-      resultCanvas,
-      dst
-    )
-
-    console.log(
-      "WARP SELESAI:",
-      width,
-      "x",
-      height
-    )
-
-    console.log(
-      "================================="
-    )
+    const resultCanvas = document.createElement("canvas")
+    resultCanvas.width = width
+    resultCanvas.height = height
+    cv.imshow(resultCanvas, dst)
 
     return resultCanvas
-
   } catch (error) {
-    console.error(
-      "ERROR WARP:",
-      error
-    )
-
+    console.error("ERROR WARP:", error)
     return null
-
   } finally {
     if (src) src.delete()
     if (dst) dst.delete()
@@ -1064,7 +801,7 @@ const warpAnswerSheet = (canvas, markers) => {
   // BACA JAWABAN DINAMIS
   // =========================
 
- const readStudentAnswers = (
+  const readStudentAnswers = (
   canvas,
   totalQuestions
 ) => {
@@ -1082,15 +819,9 @@ const warpAnswerSheet = (canvas, markers) => {
     src = cv.imread(canvas)
 
     gray = new cv.Mat()
-
-    cv.cvtColor(
-      src,
-      gray,
-      cv.COLOR_RGBA2GRAY
-    )
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
 
     binary = new cv.Mat()
-
     cv.threshold(
       gray,
       binary,
@@ -1103,300 +834,124 @@ const warpAnswerSheet = (canvas, markers) => {
 
     /*
       ==========================
-      LAYOUT HASIL WARP
+      LAYOUT HASIL WARP (900x1200)
       ==========================
-      900 x 1200
+      PENTING: nilai-nilai di bawah ini
+      HARUS diukur dari template LJK asli
+      kamu (buka satu hasil warp yang bersih,
+      lalu ukur posisi pixel bubble A di soal
+      no.1, dan jarak antar baris soal).
     */
 
     const columns = 2
+    const questionsPerColumn = Math.ceil(totalQuestions / columns)
 
-    const questionsPerColumn =
-      Math.ceil(totalQuestions / columns)
-
-    /*
-      ==========================
-      POSISI SOAL
-      ==========================
-    */
-
-    const startY = 245
-    const endY = 470
-
-    const rowHeight =
-      (endY - startY) /
-      questionsPerColumn
-
-    /*
-      ==========================
-      POSISI KOLOM
-      ==========================
-    */
+    const startY = 245        // posisi Y bubble soal nomor 1
+    const rowHeight = 27      // JARAK TETAP antar baris (bukan hasil bagi!)
 
     const leftColumnStartX = 170
     const rightColumnStartX = 490
 
-    /*
-      ==========================
-      UKURAN BUBBLE
-      ==========================
-    */
-
     const bubbleSize = 22
     const bubbleGap = 27
 
-    const choices = [
-      "A",
-      "B",
-      "C",
-      "D",
-      "E"
-    ]
-
-    /*
-      ==========================
-      LOOP SOAL
-      ==========================
-    */
+    const choices = ["A", "B", "C", "D", "E"]
 
     for (
       let questionIndex = 0;
       questionIndex < totalQuestions;
       questionIndex++
     ) {
+      const questionNumber = questionIndex + 1
 
-      const questionNumber =
-        questionIndex + 1
+      const columnIndex = Math.floor(questionIndex / questionsPerColumn)
+      const rowIndex = questionIndex % questionsPerColumn
 
-      const columnIndex =
-        Math.floor(
-          questionIndex /
-          questionsPerColumn
-        )
-
-      const rowIndex =
-        questionIndex %
-        questionsPerColumn
-
-      const rowY =
-        startY +
-        rowIndex * rowHeight
+      const rowY = startY + rowIndex * rowHeight
 
       const columnStartX =
-        columnIndex === 0
-          ? leftColumnStartX
-          : rightColumnStartX
-
-      /*
-        Simpan nilai tinta setiap pilihan
-      */
+        columnIndex === 0 ? leftColumnStartX : rightColumnStartX
 
       const inkValues = []
-
-      /*
-        ==========================
-        BACA A - E
-        ==========================
-      */
 
       for (
         let choiceIndex = 0;
         choiceIndex < choices.length;
         choiceIndex++
       ) {
-
-        const bubbleX =
-          columnStartX +
-          choiceIndex * bubbleGap
-
-        const bubbleY =
-          rowY
-
-        /*
-          Ambil bagian tengah bubble.
-          Tidak mengambil garis lingkaran.
-        */
+        const bubbleX = columnStartX + choiceIndex * bubbleGap
+        const bubbleY = rowY
 
         const padding = 7
 
-        const roiX =
-          Math.round(
-            bubbleX + padding
-          )
-
-        const roiY =
-          Math.round(
-            bubbleY + padding
-          )
-
-        const roiWidth =
-          Math.round(
-            bubbleSize -
-            padding * 2
-          )
-
-        const roiHeight =
-          Math.round(
-            bubbleSize -
-            padding * 2
-          )
-
-        /*
-          Pastikan ROI aman
-        */
+        const roiX = Math.round(bubbleX + padding)
+        const roiY = Math.round(bubbleY + padding)
+        const roiWidth = Math.round(bubbleSize - padding * 2)
+        const roiHeight = Math.round(bubbleSize - padding * 2)
 
         if (
           roiX < 0 ||
           roiY < 0 ||
-          roiX + roiWidth >
-            binary.cols ||
-          roiY + roiHeight >
-            binary.rows
+          roiX + roiWidth > binary.cols ||
+          roiY + roiHeight > binary.rows
         ) {
           inkValues.push(0)
           continue
         }
 
-        const rect =
-          new cv.Rect(
-            roiX,
-            roiY,
-            roiWidth,
-            roiHeight
-          )
+        const rect = new cv.Rect(roiX, roiY, roiWidth, roiHeight)
+        const roi = binary.roi(rect)
 
-        const roi =
-          binary.roi(rect)
-
-        const ink =
-          cv.countNonZero(roi)
-
-        const totalPixels =
-          roiWidth * roiHeight
-
-        const inkRatio =
-          ink / totalPixels
+        const ink = cv.countNonZero(roi)
+        const totalPixels = roiWidth * roiHeight
+        const inkRatio = ink / totalPixels
 
         inkValues.push(inkRatio)
 
         console.log(
           `Soal ${questionNumber} - ${choices[choiceIndex]}:`,
-          "ink =",
-          ink,
-          "ratio =",
-          inkRatio.toFixed(3)
+          "ink =", ink,
+          "ratio =", inkRatio.toFixed(3)
         )
 
         roi.delete()
       }
 
-      /*
-        ==========================
-        CARI NILAI TERTINGGI
-        ==========================
-      */
-
       let highestIndex = 0
       let secondHighest = 0
 
-      for (
-        let i = 0;
-        i < inkValues.length;
-        i++
-      ) {
-
-        if (
-          inkValues[i] >
-          inkValues[highestIndex]
-        ) {
-
-          secondHighest =
-            inkValues[highestIndex]
-
+      for (let i = 0; i < inkValues.length; i++) {
+        if (inkValues[i] > inkValues[highestIndex]) {
+          secondHighest = inkValues[highestIndex]
           highestIndex = i
-
-        } else if (
-          inkValues[i] >
-          secondHighest
-        ) {
-
-          secondHighest =
-            inkValues[i]
+        } else if (inkValues[i] > secondHighest) {
+          secondHighest = inkValues[i]
         }
       }
 
-      const highestInk =
-        inkValues[highestIndex]
-
-      /*
-        ==========================
-        TENTUKAN JAWABAN
-        ==========================
-      */
-
-      const selectedAnswer =
-        choices[highestIndex]
-
-      /*
-        Minimum tinta
-      */
+      const highestInk = inkValues[highestIndex]
+      const selectedAnswer = choices[highestIndex]
 
       const minimumInkRatio = 0.12
+      const isAmbiguous = secondHighest > highestInk * 0.75
 
-      /*
-        Kalau pilihan kedua terlalu
-        dekat dengan pilihan tertinggi,
-        anggap ambigu.
-      */
-
-      const isAmbiguous =
-        secondHighest >
-        highestInk * 0.75
-
-      if (
-        highestInk <
-          minimumInkRatio ||
-        isAmbiguous
-      ) {
-
+      if (highestInk < minimumInkRatio || isAmbiguous) {
         answers[questionNumber] = ""
-
-        console.log(
-          `Soal ${questionNumber}: KOSONG / AMBIGU`
-        )
-
+        console.log(`Soal ${questionNumber}: KOSONG / AMBIGU`)
       } else {
-
-        answers[questionNumber] =
-          selectedAnswer
-
-        console.log(
-          `Soal ${questionNumber}: ${selectedAnswer}`
-        )
+        answers[questionNumber] = selectedAnswer
+        console.log(`Soal ${questionNumber}: ${selectedAnswer}`)
       }
     }
 
-    console.log(
-      "HASIL JAWABAN:",
-      answers
-    )
-
+    console.log("HASIL JAWABAN:", answers)
     return answers
-
   } catch (error) {
-
-    console.error(
-      "Error membaca jawaban:",
-      error
-    )
-
+    console.error("Error membaca jawaban:", error)
     return {}
-
   } finally {
-
     if (src) src.delete()
-
     if (gray) gray.delete()
-
     if (binary) binary.delete()
   }
 }
