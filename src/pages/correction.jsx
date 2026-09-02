@@ -1448,7 +1448,21 @@ const warpAnswerSheet = (canvas, markers) => {
           detection.markers
         )
 
-      // Tampilkan hasil LJK yang sudah lurus
+      if (!correctedCanvas) {
+        setMessage(
+          "Gagal meluruskan LJK."
+        )
+
+        setScanning(false)
+        return
+      }
+
+      console.log(
+        "UKURAN HASIL WARP:",
+        correctedCanvas.width,
+        correctedCanvas.height
+      )
+
       const imageUrl =
         correctedCanvas.toDataURL(
           "image/jpeg",
@@ -1488,12 +1502,19 @@ const warpAnswerSheet = (canvas, markers) => {
       setMessage("Koreksi selesai! 🎉")
     } catch (error) {
       console.error(
-        "Scan error:",
+        "SCAN ERROR DETAIL:",
         error
       )
 
+      console.error(
+        "ERROR MESSAGE:",
+        error?.message
+      )
+
       setMessage(
-        "Terjadi kesalahan saat memindai."
+        `Terjadi kesalahan: ${
+          error?.message || "tidak diketahui"
+        }`
       )
     }
 
