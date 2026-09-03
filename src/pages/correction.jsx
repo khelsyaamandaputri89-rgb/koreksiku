@@ -498,53 +498,46 @@ const warpAnswerSheet = (canvas, markers) => {
     const answers = {}
 
     // =====================================
-    // UKURAN HASIL WARP
+    // LAYOUT LJK HASIL WARP
     // =====================================
-
-    const width = canvas.width
-    const height = canvas.height
-
-    console.log(
-      "UKURAN CANVAS BACA:",
-      width,
-      height
-    )
-
-    // =====================================
-    // LAYOUT LJK
-    // =====================================
-
-    const columns = 2
 
     const questionsPerColumn =
-      Math.ceil(
-        totalQuestions / columns
-      )
+      Math.ceil(totalQuestions / 2)
 
-    // =====================================
-    // POSISI AREA JAWABAN
-    // =====================================
+    /*
+      POSISI B DIPEROLEH DARI KALIBRASI HP
 
-    const startY = 245
-    const endY = 470
+      Kolom kiri:
+      B ≈ X 258-260
 
-    const rowHeight =
-      (endY - startY) /
-      questionsPerColumn
+      Kolom kanan:
+      B ≈ X 584
 
-    // =====================================
-    // POSISI KOLOM
-    // =====================================
+      Jarak antar soal:
+      ≈ 35 pixel
+    */
 
-    const leftColumnStartX = 170
-    const rightColumnStartX = 490
+    const leftB_X = 259
+    const rightB_X = 584
 
-    // =====================================
-    // UKURAN BUBBLE
-    // =====================================
+    const leftStartY = 415
+    const rightStartY = 422
+
+    const rowHeight = 35
+
+    /*
+      Jarak antar pilihan A-B-C-D-E
+
+      B menjadi titik tengah.
+    */
+
+    const choiceGap = 27
+
+    /*
+      Ukuran area bubble
+    */
 
     const bubbleSize = 22
-    const bubbleGap = 27
 
     const choices = [
       "A",
@@ -555,7 +548,71 @@ const warpAnswerSheet = (canvas, markers) => {
     ]
 
     // =====================================
-    // BACA SETIAP SOAL
+    // FUNGSI BACA TINTA
+    // =====================================
+
+    const readInk = (
+      centerX,
+      centerY
+    ) => {
+
+      /*
+        Ambil bagian tengah bubble.
+        Tidak mengambil garis lingkaran.
+      */
+
+      const padding = 6
+
+      const roiX =
+        Math.round(
+          centerX - bubbleSize / 2 + padding
+        )
+
+      const roiY =
+        Math.round(
+          centerY - bubbleSize / 2 + padding
+        )
+
+      const roiWidth =
+        bubbleSize - padding * 2
+
+      const roiHeight =
+        bubbleSize - padding * 2
+
+      if (
+        roiX < 0 ||
+        roiY < 0 ||
+        roiX + roiWidth > binary.cols ||
+        roiY + roiHeight > binary.rows
+      ) {
+        return 0
+      }
+
+      const rect =
+        new cv.Rect(
+          roiX,
+          roiY,
+          roiWidth,
+          roiHeight
+        )
+
+      const roi =
+        binary.roi(rect)
+
+      const ink =
+        cv.countNonZero(roi)
+
+      roi.delete()
+
+      const ratio =
+        ink /
+        (roiWidth * roiHeight)
+
+      return ratio
+    }
+
+    // =====================================
+    // LOOP SEMUA SOAL
     // =====================================
 
     for (
@@ -567,34 +624,51 @@ const warpAnswerSheet = (canvas, markers) => {
       const questionNumber =
         questionIndex + 1
 
-      // Tentukan kolom
-      const columnIndex =
-        Math.floor(
-          questionIndex /
-          questionsPerColumn
-        )
+      /*
+        Tentukan kolom
+      */
 
-      // Tentukan baris
-      const rowIndex =
-        questionIndex %
+      const isLeftColumn =
+        questionIndex <
         questionsPerColumn
 
-      // Posisi Y
-      const rowY =
-        startY +
+      /*
+        Nomor baris
+      */
+
+      const rowIndex =
+        isLeftColumn
+          ? questionIndex
+          : questionIndex -
+            questionsPerColumn
+
+      /*
+        Posisi B
+      */
+
+      const bX =
+        isLeftColumn
+          ? leftB_X
+          : rightB_X
+
+      const baseY =
+        isLeftColumn
+          ? leftStartY
+          : rightStartY
+
+      const y =
+        baseY +
         rowIndex * rowHeight
 
-      // Posisi X kolom
-      const columnStartX =
-        columnIndex === 0
-          ? leftColumnStartX
-          : rightColumnStartX
+      /*
+        A = B - 27
+        B = B
+        C = B + 27
+        D = B + 54
+        E = B + 81
+      */
 
       const inkValues = []
-
-      // =====================================
-      // BACA A - E
-      // =====================================
 
       for (
         let choiceIndex = 0;
@@ -602,78 +676,25 @@ const warpAnswerSheet = (canvas, markers) => {
         choiceIndex++
       ) {
 
-        const bubbleX =
-          columnStartX +
-          choiceIndex * bubbleGap
-
-        const bubbleY =
-          rowY
-
-        // Ambil bagian tengah bubble
-        const padding = 6
-
-        const roiX =
-          Math.round(
-            bubbleX + padding
-          )
-
-        const roiY =
-          Math.round(
-            bubbleY + padding
-          )
-
-        const roiWidth =
-          Math.round(
-            bubbleSize -
-            padding * 2
-          )
-
-        const roiHeight =
-          Math.round(
-            bubbleSize -
-            padding * 2
-          )
-
-        if (
-          roiX < 0 ||
-          roiY < 0 ||
-          roiX + roiWidth >
-            binary.cols ||
-          roiY + roiHeight >
-            binary.rows
-        ) {
-          inkValues.push(0)
-          continue
-        }
-
-        const rect =
-          new cv.Rect(
-            roiX,
-            roiY,
-            roiWidth,
-            roiHeight
-          )
-
-        const roi =
-          binary.roi(rect)
+        const x =
+          bX +
+          (choiceIndex - 1) *
+          choiceGap
 
         const ink =
-          cv.countNonZero(roi)
+          readInk(x, y)
 
-        const totalPixels =
-          roiWidth * roiHeight
-
-        const inkRatio =
-          ink / totalPixels
-
-        inkValues.push(inkRatio)
+        inkValues.push(ink)
 
         console.log(
-          `Soal ${questionNumber} - ${choices[choiceIndex]}:`,
-          inkRatio.toFixed(3)
+          `Soal ${questionNumber} - ${choices[choiceIndex]}`,
+          "X:",
+          Math.round(x),
+          "Y:",
+          Math.round(y),
+          "Ink:",
+          ink.toFixed(3)
         )
-
-        roi.delete()
       }
 
       // =====================================
@@ -698,27 +719,30 @@ const warpAnswerSheet = (canvas, markers) => {
       const highestInk =
         inkValues[highestIndex]
 
-      // =====================================
-      // CARI NILAI KEDUA TERBESAR
-      // =====================================
+      /*
+        Cari tinta kedua terbesar
+      */
 
-      const sortedValues =
+      const sorted =
         [...inkValues].sort(
           (a, b) => b - a
         )
 
       const secondHighest =
-        sortedValues[1] || 0
+        sorted[1] || 0
 
-      // =====================================
-      // BATAS TINTA
-      // =====================================
+      /*
+        ==============================
+        PENENTUAN JAWABAN
+        ==============================
+      */
 
-      const minimumInk = 0.10
+      const minimumInk = 0.08
 
-      // =====================================
-      // CEK AMBIGU
-      // =====================================
+      /*
+        Kalau dua pilihan sama-sama
+        tinggi, jangan dipaksakan.
+      */
 
       const isAmbiguous =
         secondHighest >
@@ -744,26 +768,21 @@ const warpAnswerSheet = (canvas, markers) => {
 
       console.log(
         `HASIL SOAL ${questionNumber}:`,
-        answers[questionNumber] || "KOSONG",
-        "| nilai:",
-        inkValues.map(
-          (value) =>
-            value.toFixed(3)
-        )
+        answers[questionNumber] || "KOSONG"
       )
     }
 
     console.log(
-      "================================"
+      "=============================="
     )
 
     console.log(
-      "HASIL JAWABAN:",
+      "HASIL AKHIR:",
       answers
     )
 
     console.log(
-      "================================"
+      "=============================="
     )
 
     return answers
@@ -787,41 +806,41 @@ const warpAnswerSheet = (canvas, markers) => {
   }
 }
 
-const handlePreviewClick = (e) => {
-  const img = e.target
-  const rect = img.getBoundingClientRect()
-  const naturalWidth = img.naturalWidth
-  const naturalHeight = img.naturalHeight
+// const handlePreviewClick = (e) => {
+//   const img = e.target
+//   const rect = img.getBoundingClientRect()
+//   const naturalWidth = img.naturalWidth
+//   const naturalHeight = img.naturalHeight
 
-  const containerRatio = rect.width / rect.height
-  const imageRatio = naturalWidth / naturalHeight
+//   const containerRatio = rect.width / rect.height
+//   const imageRatio = naturalWidth / naturalHeight
 
-  let renderedWidth, renderedHeight, offsetX, offsetY
+//   let renderedWidth, renderedHeight, offsetX, offsetY
 
-  if (imageRatio > containerRatio) {
-    renderedWidth = rect.width
-    renderedHeight = rect.width / imageRatio
-    offsetX = 0
-    offsetY = (rect.height - renderedHeight) / 2
-  } else {
-    renderedHeight = rect.height
-    renderedWidth = rect.height * imageRatio
-    offsetY = 0
-    offsetX = (rect.width - renderedWidth) / 2
-  }
+//   if (imageRatio > containerRatio) {
+//     renderedWidth = rect.width
+//     renderedHeight = rect.width / imageRatio
+//     offsetX = 0
+//     offsetY = (rect.height - renderedHeight) / 2
+//   } else {
+//     renderedHeight = rect.height
+//     renderedWidth = rect.height * imageRatio
+//     offsetY = 0
+//     offsetX = (rect.width - renderedWidth) / 2
+//   }
 
-  const clickX = e.clientX - rect.left - offsetX
-  const clickY = e.clientY - rect.top - offsetY
+//   const clickX = e.clientX - rect.left - offsetX
+//   const clickY = e.clientY - rect.top - offsetY
 
-  if (clickX < 0 || clickY < 0 || clickX > renderedWidth || clickY > renderedHeight) {
-    return
-  }
+//   if (clickX < 0 || clickY < 0 || clickX > renderedWidth || clickY > renderedHeight) {
+//     return
+//   }
 
-  const naturalX = Math.round((clickX / renderedWidth) * naturalWidth)
-  const naturalY = Math.round((clickY / renderedHeight) * naturalHeight)
+//   const naturalX = Math.round((clickX / renderedWidth) * naturalWidth)
+//   const naturalY = Math.round((clickY / renderedHeight) * naturalHeight)
 
-  setCalibratePoint({ x: naturalX, y: naturalY })
-}
+//   setCalibratePoint({ x: naturalX, y: naturalY })
+// }
 
   const handleScan = async () => {
     if (!videoRef.current) return
@@ -1290,8 +1309,28 @@ const handlePreviewClick = (e) => {
                 <img
                   src={preview}
                   alt="Hasil scan"
-                  onClick={handlePreviewClick}
-                  className="max-h-[700px] w-full cursor-crosshair object-contain"
+                  onClick={(e) => {
+                    const img = e.currentTarget
+                    const rect = img.getBoundingClientRect()
+
+                    const x =
+                      Math.round(
+                        ((e.clientX - rect.left) / rect.width) *
+                          img.naturalWidth
+                      )
+
+                    const y =
+                      Math.round(
+                        ((e.clientY - rect.top) / rect.height) *
+                          img.naturalHeight
+                      )
+
+                    setCalibratePoint({
+                      x,
+                      y
+                    })
+                  }}
+                  className="block w-full cursor-crosshair object-contain"
                 />
               </div>
 
