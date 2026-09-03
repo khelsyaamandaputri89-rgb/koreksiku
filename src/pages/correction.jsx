@@ -791,32 +791,6 @@ const readStudentAnswers = (
       return {}
     }
 
-    // Ambil 5 group X yang
-    // memiliki jumlah bubble terbanyak
-    const fiveXGroups =
-      [...xGroups]
-        .sort(
-          (a, b) =>
-            b.bubbles.length -
-            a.bubbles.length
-        )
-        .slice(0, 5)
-        .sort(
-          (a, b) =>
-            a.centerX -
-            b.centerX
-        )
-
-    console.log(
-      "5 POSISI A-E:",
-      fiveXGroups.map(
-        (g) =>
-          Math.round(
-            g.centerX
-          )
-      )
-    )
-
     // =========================
     // FUNGSI HITUNG TINTA
     // =========================
@@ -1653,28 +1627,39 @@ const readStudentAnswers = (
       )
 
       // Baca jawaban sesuai jumlah soal
-      const detectedAnswers =
+      const scanResult =
         readStudentAnswers(
           correctedCanvas,
           answerKeys.length
         )
 
       console.log(
-        "Jawaban siswa:",
-        detectedAnswers
+        "HASIL PEMBACAAN:",
+        scanResult
       )
+
+      const detectedAnswers =
+        scanResult.answers || {}
 
       setStudentAnswers(
         detectedAnswers
       )
 
-      // Hitung hasil
-      const resultCorrection = calculateResult(
-        detectedAnswers,
-        answerKeys
+      // Tampilkan debug di HP
+      setMessage(
+        scanResult.debug
       )
 
-      setCorrectionResult(resultCorrection)
+      // Hitung hasil
+      const resultCorrection =
+        calculateResult(
+          detectedAnswers,
+          answerKeys
+        )
+
+      setCorrectionResult(
+        resultCorrection
+      )
 
       setMessage("Koreksi selesai! 🎉")
     } catch (error) {
