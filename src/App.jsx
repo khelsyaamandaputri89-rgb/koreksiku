@@ -9,6 +9,7 @@ import Login from "./pages/login"
 import Register from "./pages/register"
 import ProtectedRoute from "./components/protectedRoute"
 import AnswerSheet from "./pages/answerSheet"
+import Profile from "./pages/profile"
 
 function App() {
   return (
@@ -75,6 +76,15 @@ function App() {
             element={
             <ProtectedRoute>
               <Correction />
+            </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/profile"
+            element={
+            <ProtectedRoute>
+              <Profile />
             </ProtectedRoute>
             }
           />
