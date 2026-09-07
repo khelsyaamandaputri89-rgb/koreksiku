@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { supabase } from "../services/supabase"
 
-function Navbar() {
+function Navbar({onMenuClick}) {
   const [openProfile, setOpenProfile] = useState(false)
   const profileRef = useRef(null)
 
@@ -42,7 +42,10 @@ function Navbar() {
       
       {/* KIRI */}
       <div className="flex items-center gap-3">
-        <button className="md:hidden text-2xl">
+        <button
+          onClick={onMenuClick}
+          className="md:hidden text-2xl"
+        >
           ☰
         </button>
 
