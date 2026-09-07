@@ -198,13 +198,13 @@ function AnswerSheet() {
 
   const questionRowHeight =
     multipleChoiceCount >= 100
-      ? "4mm"
-      : multipleChoiceCount >= 90
-      ? "4.2mm"
-      : multipleChoiceCount >= 80
-      ? "4.5mm"
-      : multipleChoiceCount >= 70
       ? "4.8mm"
+      : multipleChoiceCount >= 90
+      ? "4.8mm"
+      : multipleChoiceCount >= 80
+      ? "4.8mm"
+      : multipleChoiceCount >= 70
+      ? "5mm"
       : multipleChoiceCount >= 60
       ? "5mm"
       : "5.5mm"
