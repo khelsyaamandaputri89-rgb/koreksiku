@@ -136,82 +136,68 @@ function AnswerSheet() {
   // =====================================================
 
   const handlePrint = () => {
-  setIsPrinting(true)
+    setIsPrinting(true)
 
-  const printStyle = document.createElement("style")
+    const printStyle = document.createElement("style")
 
-  printStyle.id = "answer-sheet-print-style"
+    printStyle.id = "answer-sheet-print-style"
 
-  printStyle.innerHTML = `
-    @page {
-      size: A4 portrait;
-      margin: 0;
-    }
-
-    @media print {
-      html,
-      body {
-        width: 210mm !important;
-        height: 297mm !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #ffffff !important;
-        overflow: hidden !important;
+    printStyle.innerHTML = `
+      @page {
+        size: 210mm 330mm;
+        margin: 0;
       }
 
-      body * {
-        visibility: hidden;
+      @media print {
+        html,
+        body {
+          width: 210mm !important;
+          height: 330mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+        }
+
+        body * {
+          visibility: hidden;
+        }
+
+        #answer-sheet-print,
+        #answer-sheet-print * {
+          visibility: visible;
+        }
+
+        #answer-sheet-print {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 210mm !important;
+          height: 330mm !important;
+          margin: 0 !important;
+          box-shadow: none !important;
+        }
       }
+    `
 
-      #answer-sheet-print,
-      #answer-sheet-print * {
-        visibility: visible;
-      }
-
-      #answer-sheet-print {
-        position: absolute !important;
-
-        left: 0 !important;
-        top: 0 !important;
-
-        width: 210mm !important;
-        height: 330mm !important;
-
-        margin: 0 !important;
-
-        box-shadow: none !important;
-
-        /*
-         * F4 330mm -> A4 297mm
-         * 297 / 330 = 0.9
-         */
-        zoom: 0.9 !important;
-
-        transform-origin: top left !important;
-
-        overflow: hidden !important;
-      }
-    }
-  `
-
-  document.head.appendChild(printStyle)
-
-  setTimeout(() => {
-    window.print()
+    document.head.appendChild(printStyle)
 
     setTimeout(() => {
-      const style = document.getElementById(
-        "answer-sheet-print-style"
-      )
+      window.print()
 
-      if (style) {
-        style.remove()
-      }
+      setTimeout(() => {
+        const style =
+          document.getElementById(
+            "answer-sheet-print-style"
+          )
 
-      setIsPrinting(false)
-    }, 500)
-  }, 300)
-}
+        if (style) {
+          style.remove()
+        }
+
+        setIsPrinting(false)
+      }, 500)
+    }, 300)
+  }
 
   return (
     <div
