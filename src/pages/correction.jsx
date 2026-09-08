@@ -249,9 +249,15 @@ function correction() {
 // DETEKSI 4 MARKER LJK
 // =========================
 
+// =========================
+// DETEKSI LJK - TAHAN MIRING
+// =========================
 const detectAnswerSheet = (canvas) => {
   if (!window.cv || !window.cv.Mat) {
-    return { detected: false, message: "OpenCV belum siap." }
+    return {
+      detected: false,
+      message: "OpenCV belum siap."
+    }
   }
 
   const cv = window.cv
@@ -268,124 +274,344 @@ const detectAnswerSheet = (canvas) => {
 
   try {
     src = cv.imread(canvas)
+
     const imageWidth = src.cols
     const imageHeight = src.rows
     const imageArea = imageWidth * imageHeight
 
+    // =========================
     // 1. GRAYSCALE
+    // =========================
     gray = new cv.Mat()
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
 
-    // 2. BLUR (supaya teks/bubble di dalam kertas
-    //    tidak memecah tepi kertas jadi banyak potongan)
-    blurred = new cv.Mat()
-    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0)
-
-    // 3. DETEKSI TEPI
-    edges = new cv.Mat()
-    cv.Canny(blurred, edges, 50, 150)
-
-    // 4. SAMBUNGKAN TEPI YANG TERPUTUS
-    kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(7, 7))
-    dilated = new cv.Mat()
-    cv.dilate(edges, dilated, kernel, new cv.Point(-1, -1), 2)
-
-    // 5. CARI CONTOUR
-    contours = new cv.MatVector()
-    hierarchy = new cv.Mat()
-    cv.findContours(
-      dilated, contours, hierarchy,
-      cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
+    cv.cvtColor(
+      src,
+      gray,
+      cv.COLOR_RGBA2GRAY
     )
 
-    // 6. PILIH KONTUR TERBESAR YANG MASUK AKAL
-    //    SEBAGAI KERTAS LJK
-    let bestArea = 0
+    // =========================
+    // 2. BLUR
+    // =========================
+    blurred = new cv.Mat()
 
-    for (let i = 0; i < contours.size(); i++) {
+    cv.GaussianBlur(
+      gray,
+      blurred,
+      new cv.Size(5, 5),
+      0
+    )
+
+    // =========================
+    // 3. EDGE
+    // =========================
+    edges = new cv.Mat()
+
+    cv.Canny(
+      blurred,
+      edges,
+      40,
+      120
+    )
+
+    // =========================
+    // 4. SAMBUNG EDGE
+    // =========================
+    kernel = cv.getStructuringElement(
+      cv.MORPH_RECT,
+      new cv.Size(5, 5)
+    )
+
+    dilated = new cv.Mat()
+
+    cv.dilate(
+      edges,
+      dilated,
+      kernel,
+      new cv.Point(-1, -1),
+      2
+    )
+
+    // =========================
+    // 5. CARI CONTOUR
+    // =========================
+    contours = new cv.MatVector()
+    hierarchy = new cv.Mat()
+
+    cv.findContours(
+      dilated,
+      contours,
+      hierarchy,
+      cv.RETR_EXTERNAL,
+      cv.CHAIN_APPROX_SIMPLE
+    )
+
+    // =========================
+    // 6. CARI BENTUK 4 SUDUT
+    // =========================
+    let bestArea = 0
+    let bestApprox = null
+
+    for (
+      let i = 0;
+      i < contours.size();
+      i++
+    ) {
       const contour = contours.get(i)
+
       const area = cv.contourArea(contour)
 
-      // Kertas minimal 20% dari luas foto,
-      // tapi tidak mungkin memenuhi 100% foto
-      if (area > bestArea && area > imageArea * 0.2 && area < imageArea * 0.95) {
-        if (bestContour) bestContour.delete()
-        bestContour = contour
+      // Abaikan objek kecil
+      if (
+        area < imageArea * 0.20 ||
+        area > imageArea * 0.98
+      ) {
+        contour.delete()
+        continue
+      }
+
+      const perimeter =
+        cv.arcLength(contour, true)
+
+      const approx = new cv.Mat()
+
+      cv.approxPolyDP(
+        contour,
+        approx,
+        0.02 * perimeter,
+        true
+      )
+
+      // Kita cari bentuk 4 sudut
+      if (
+        approx.rows === 4 &&
+        area > bestArea
+      ) {
+        if (bestApprox) {
+          bestApprox.delete()
+        }
+
+        bestApprox = approx
         bestArea = area
       } else {
-        contour.delete()
+        approx.delete()
       }
+
+      contour.delete()
     }
 
-    if (!bestContour) {
+    if (!bestApprox) {
       return {
         detected: false,
         message:
-          "Lembar jawaban tidak terdeteksi. Pastikan seluruh LJK terlihat jelas dan kontras dengan latar belakang meja.",
+          "LJK belum terdeteksi. Pastikan seluruh kertas terlihat."
       }
     }
 
-    // 7. BUNGKUS DENGAN ROTATED RECTANGLE
-    //    (tahan terhadap kertas miring / sedikit terlipat)
-    const rotatedRect = cv.minAreaRect(bestContour)
-    bestContour.delete()
-    bestContour = null
+    // =========================
+    // 7. AMBIL 4 TITIK
+    // =========================
+    const points = []
 
-    const boxPoints = cv.RotatedRect.points(rotatedRect)
-    const pts = [boxPoints[0], boxPoints[1], boxPoints[2], boxPoints[3]]
-
-    // =========================================
-    // 8. URUTKAN 4 TITIK
-    //    topLeft, topRight, bottomLeft, bottomRight
-    //    (toleran terhadap rotasi sedang)
-    // =========================================
-
-    const byY = [...pts].sort((a, b) => a.y - b.y)
-    const topTwo = [byY[0], byY[1]].sort((a, b) => a.x - b.x)
-    const bottomTwo = [byY[2], byY[3]].sort((a, b) => a.x - b.x)
-
-    const topLeft = topTwo[0]
-    const topRight = topTwo[1]
-    const bottomLeft = bottomTwo[0]
-    const bottomRight = bottomTwo[1]
-
-    // 9. VALIDASI BENTUK
-    if (
-      topLeft.x >= topRight.x ||
-      bottomLeft.x >= bottomRight.x ||
-      topLeft.y >= bottomLeft.y ||
-      topRight.y >= bottomRight.y
+    for (
+      let i = 0;
+      i < 4;
+      i++
     ) {
+      const point =
+        bestApprox.data32S
+
+      // approx CV_32S
+      const x =
+        point[i * 2]
+
+      const y =
+        point[i * 2 + 1]
+
+      points.push({
+        x,
+        y
+      })
+    }
+
+    // =========================
+    // 8. URUTKAN SUDUT
+    // =========================
+    // Metode ini lebih tahan terhadap
+    // LJK miring/perspektif.
+
+    const topLeft =
+      points.reduce(
+        (best, p) =>
+          p.x + p.y <
+          best.x + best.y
+            ? p
+            : best
+      )
+
+    const bottomRight =
+      points.reduce(
+        (best, p) =>
+          p.x + p.y >
+          best.x + best.y
+            ? p
+            : best
+      )
+
+    const topRight =
+      points.reduce(
+        (best, p) =>
+          p.x - p.y >
+          best.x - best.y
+            ? p
+            : best
+      )
+
+    const bottomLeft =
+      points.reduce(
+        (best, p) =>
+          p.x - p.y <
+          best.x - best.y
+            ? p
+            : best
+      )
+
+    // =========================
+    // 9. VALIDASI
+    // =========================
+    const widthTop = Math.hypot(
+      topRight.x - topLeft.x,
+      topRight.y - topLeft.y
+    )
+
+    const widthBottom = Math.hypot(
+      bottomRight.x - bottomLeft.x,
+      bottomRight.y - bottomLeft.y
+    )
+
+    const heightLeft = Math.hypot(
+      bottomLeft.x - topLeft.x,
+      bottomLeft.y - topLeft.y
+    )
+
+    const heightRight = Math.hypot(
+      bottomRight.x - topRight.x,
+      bottomRight.y - topRight.y
+    )
+
+    const averageWidth =
+      (widthTop + widthBottom) / 2
+
+    const averageHeight =
+      (heightLeft + heightRight) / 2
+
+    const ratio =
+      averageWidth / averageHeight
+
+    // F4 portrait sekitar 0.636
+    // beri toleransi cukup lebar
+    if (
+      ratio < 0.45 ||
+      ratio > 0.85
+    ) {
+      bestApprox.delete()
+
       return {
         detected: false,
         message:
-          "Bentuk lembar jawaban belum terdeteksi dengan benar. Coba foto lebih lurus/rata dan pastikan latar belakang kontras.",
+          "Bentuk LJK kurang jelas. Coba pastikan seluruh kertas masuk kamera."
       }
     }
 
     const markers = {
-      topLeft: { x: topLeft.x, y: topLeft.y },
-      topRight: { x: topRight.x, y: topRight.y },
-      bottomLeft: { x: bottomLeft.x, y: bottomLeft.y },
-      bottomRight: { x: bottomRight.x, y: bottomRight.y },
+      topLeft: {
+        x: topLeft.x,
+        y: topLeft.y
+      },
+      topRight: {
+        x: topRight.x,
+        y: topRight.y
+      },
+      bottomLeft: {
+        x: bottomLeft.x,
+        y: bottomLeft.y
+      },
+      bottomRight: {
+        x: bottomRight.x,
+        y: bottomRight.y
+      }
     }
 
-    console.log("================================")
-    console.log("SUDUT LJK TERDETEKSI (deteksi tepi kertas)")
-    console.log("TOP LEFT:", markers.topLeft)
-    console.log("TOP RIGHT:", markers.topRight)
-    console.log("BOTTOM LEFT:", markers.bottomLeft)
-    console.log("BOTTOM RIGHT:", markers.bottomRight)
-    console.log("================================")
+    console.log(
+      "===== SUDUT LJK ====="
+    )
+
+    console.log(
+      "TL:",
+      markers.topLeft
+    )
+
+    console.log(
+      "TR:",
+      markers.topRight
+    )
+
+    console.log(
+      "BL:",
+      markers.bottomLeft
+    )
+
+    console.log(
+      "BR:",
+      markers.bottomRight
+    )
+
+    console.log(
+      "RATIO:",
+      ratio
+    )
+
+    console.log(
+      "TOP WIDTH:",
+      widthTop
+    )
+
+    console.log(
+      "BOTTOM WIDTH:",
+      widthBottom
+    )
+
+    console.log(
+      "LEFT HEIGHT:",
+      heightLeft
+    )
+
+    console.log(
+      "RIGHT HEIGHT:",
+      heightRight
+    )
+
+    bestApprox.delete()
 
     return {
       detected: true,
-      message: "Lembar jawaban berhasil terdeteksi! ✅",
-      markers,
+      message:
+        "Lembar jawaban berhasil terdeteksi! ✅",
+      markers
     }
+
   } catch (error) {
-    console.error("ERROR DETEKSI LJK:", error)
-    return { detected: false, message: "Gagal mendeteksi lembar jawaban." }
+    console.error(
+      "ERROR DETEKSI LJK:",
+      error
+    )
+
+    return {
+      detected: false,
+      message:
+        "Gagal mendeteksi lembar jawaban."
+    }
+
   } finally {
     if (src) src.delete()
     if (gray) gray.delete()
@@ -395,7 +621,6 @@ const detectAnswerSheet = (canvas) => {
     if (contours) contours.delete()
     if (hierarchy) hierarchy.delete()
     if (kernel) kernel.delete()
-    if (bestContour) bestContour.delete()
   }
 }
   // =========================
