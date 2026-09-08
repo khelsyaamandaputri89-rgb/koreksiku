@@ -262,7 +262,7 @@ function createQuestion() {
 
                 <div className="grid grid-cols-4 gap-2">
 
-                  {["A", "B", "C", "D"].map(
+                  {["A", "B", "C", "D", "E"].map(
                     (option) => (
 
                       <button
