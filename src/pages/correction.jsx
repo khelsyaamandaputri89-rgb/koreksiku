@@ -458,22 +458,26 @@ const warpAnswerSheet = (canvas, markers) => {
 }
 
 
-// =========================
+// =====================================================
 // BACA JAWABAN SISWA
-// VERSI GRID LJK
+// VERSI GRID TETAP SESUAI LAYOUT LJK
 //
-// 45-70 soal  = 2 kolom
-// 80-100 soal = 3 kolom
+// Tidak menggunakan HoughCircles.
 //
-// Tidak membaca jawaban dari jumlah
-// lingkaran Hough.
-// Hough hanya digunakan untuk
-// menemukan pola posisi/grid.
-// Jawaban ditentukan dari tinta
-// di tengah setiap bubble A-E.
-// =========================
+// Posisi bubble dihitung dari layout LJK yang dibuat
+// oleh AnswerSheet.jsx.
+//
+// Jawaban ditentukan berdasarkan tinta paling tebal
+// di bagian TENGAH bubble A-E.
+//
+// 40-70  = 2 kolom
+// 80-100 = 3 kolom
+// =====================================================
 
-const readStudentAnswers = (canvas, totalQuestions) => {
+const readStudentAnswers = (
+  canvas,
+  totalQuestions
+) => {
   if (!window.cv || !window.cv.Mat) {
     return {
       answers: {},
@@ -486,42 +490,110 @@ const readStudentAnswers = (canvas, totalQuestions) => {
   let src = null
   let gray = null
   let blurred = null
-  let circles = null
 
   try {
+
     // =====================================================
     // VALIDASI JUMLAH SOAL
     // =====================================================
 
     const supportedTotals = [
+      40,
       45,
       50,
       60,
       70,
       80,
       90,
-      100
+      100,
     ]
 
-    if (!supportedTotals.includes(totalQuestions)) {
+    if (
+      !supportedTotals.includes(
+        totalQuestions
+      )
+    ) {
       return {
         answers: {},
         debug:
-          `❌ Jumlah soal ${totalQuestions}. ` +
-          `Versi ini mendukung 45, 50, 60, 70, 80, 90, 100 soal A-E.`
+          `❌ Jumlah soal ${totalQuestions} ` +
+          `belum didukung.`,
       }
     }
 
     // =====================================================
+    // UKURAN CANVAS HASIL WARP
+    // =====================================================
+
+    const width = canvas.width
+    const height = canvas.height
+
+    // LJK kita di-warp menjadi 900 x 1200
+    // Jadi semua koordinat dibuat berdasarkan
+    // ukuran tersebut.
+
+    const baseWidth = 900
+    const baseHeight = 1200
+
+    const scaleX =
+      width / baseWidth
+
+    const scaleY =
+      height / baseHeight
+
+    // =====================================================
     // JUMLAH KOLOM
-    // HARUS SAMA DENGAN AnswerSheet.jsx
+    //
+    // Sama seperti AnswerSheet.jsx
     // =====================================================
 
     const columnCount =
-      totalQuestions >= 80 ? 3 : 2
+      totalQuestions >= 80
+        ? 3
+        : 2
 
     // =====================================================
-    // BACA GAMBAR HASIL WARP
+    // JUMLAH SOAL PER KOLOM
+    //
+    // Contoh:
+    //
+    // 45 -> 23 / 22
+    // 50 -> 25 / 25
+    // 60 -> 30 / 30
+    // 70 -> 35 / 35
+    //
+    // 80 -> 27 / 27 / 26
+    // 90 -> 30 / 30 / 30
+    // 100 -> 34 / 34 / 32
+    // =====================================================
+
+    const questionsPerColumn =
+      Math.ceil(
+        totalQuestions /
+          columnCount
+      )
+
+    const rowsPerColumn =
+      Array.from(
+        {
+          length:
+            columnCount,
+        },
+        (_, index) => {
+          const start =
+            index *
+            questionsPerColumn
+
+          return Math.min(
+            questionsPerColumn,
+            totalQuestions -
+              start
+          )
+        }
+      )
+
+    // =====================================================
+    // BACA GAMBAR
     // =====================================================
 
     src = cv.imread(canvas)
@@ -544,675 +616,339 @@ const readStudentAnswers = (canvas, totalQuestions) => {
     )
 
     // =====================================================
-    // CARI LINGKARAN HANYA UNTUK MENDAPATKAN GRID
-    // BUKAN UNTUK MENENTUKAN JAWABAN
+    // TENTUKAN UKURAN BARIS
+    //
+    // HARUS SAMA DENGAN AnswerSheet.jsx
     // =====================================================
 
-    circles = new cv.Mat()
+    let rowHeightMm = 5.5
 
-    cv.HoughCircles(
-      blurred,
-      circles,
-      cv.HOUGH_GRADIENT,
-      1,
-      7,
-      70,
-      12,
-      3,
-      14
-    )
-
-    const rawCandidates = []
-
-    for (let i = 0; i < circles.cols; i++) {
-      const x = circles.data32F[i * 3]
-      const y = circles.data32F[i * 3 + 1]
-      const radius = circles.data32F[i * 3 + 2]
-
-      if (
-        !Number.isFinite(x) ||
-        !Number.isFinite(y) ||
-        !Number.isFinite(radius)
-      ) {
-        continue
-      }
-
-      if (
-        radius < 3 ||
-        radius > 14
-      ) {
-        continue
-      }
-
-      if (
-        x < 30 ||
-        x > gray.cols - 30 ||
-        y < 120 ||
-        y > gray.rows - 80
-      ) {
-        continue
-      }
-
-      rawCandidates.push({
-        x,
-        y,
-        radius
-      })
+    if (
+      totalQuestions >= 100
+    ) {
+      rowHeightMm = 4.8
+    } else if (
+      totalQuestions >= 80
+    ) {
+      rowHeightMm = 4.8
+    } else if (
+      totalQuestions >= 70
+    ) {
+      rowHeightMm = 5
+    } else if (
+      totalQuestions >= 60
+    ) {
+      rowHeightMm = 5
     }
 
     // =====================================================
-    // DEDUPLIKASI
+    // UKURAN BUBBLE
+    //
+    // HARUS SAMA DENGAN AnswerSheet.jsx
     // =====================================================
 
-    const candidates = []
+    let bubbleSizeMm = 5
 
-    rawCandidates
-      .sort((a, b) => b.radius - a.radius)
-      .forEach((bubble) => {
-        const duplicate =
-          candidates.some((existing) => {
-            const dx =
-              existing.x - bubble.x
-
-            const dy =
-              existing.y - bubble.y
-
-            return (
-              Math.sqrt(
-                dx * dx +
-                  dy * dy
-              ) < 5
-            )
-          })
-
-        if (!duplicate) {
-          candidates.push(bubble)
-        }
-      })
-
-    if (candidates.length < 50) {
-      return {
-        answers: {},
-        debug:
-          `❌ Pola bubble tidak cukup terdeteksi. ` +
-          `Terdeteksi ${candidates.length} titik.`
-      }
+    if (
+      totalQuestions >= 100
+    ) {
+      bubbleSizeMm = 4
+    } else if (
+      totalQuestions >= 90
+    ) {
+      bubbleSizeMm = 4.2
+    } else if (
+      totalQuestions >= 80
+    ) {
+      bubbleSizeMm = 4.3
+    } else if (
+      totalQuestions >= 70
+    ) {
+      bubbleSizeMm = 4.5
     }
 
     // =====================================================
-    // MEDIAN RADIUS
+    // KONVERSI MM -> PIXEL
+    //
+    // LJK:
+    // 210mm x 330mm
+    //
+    // Warp:
+    // 900 x 1200
     // =====================================================
 
-    const radii =
-      candidates
-        .map((item) => item.radius)
-        .sort((a, b) => a - b)
+    const pxPerMmX =
+      width / 210
 
-    const medianRadius =
-      radii[
-        Math.floor(
-          radii.length / 2
-        )
-      ] || 6
+    const pxPerMmY =
+      height / 330
 
     // =====================================================
-    // STEP 1
-    // CARI TRACK X
+    // CARI GARIS PEMBATAS
+    // "PILIHAN GANDA"
     //
-    // Kita ingin:
+    // Garis ini berada tepat sebelum
+    // baris soal pertama.
     //
-    // 2 kolom -> 10 track
-    // 3 kolom -> 15 track
-    //
-    // Setiap kolom:
-    // A B C D E
+    // Kita cari garis horizontal panjang
+    // supaya posisi Y tetap akurat walaupun
+    // hasil foto sedikit berubah.
     // =====================================================
 
-    const sortedX =
-      [...candidates].sort(
-        (a, b) => a.x - b.x
-      )
+    const findQuestionSectionLine = () => {
 
-    const xGroups = []
-
-    sortedX.forEach((bubble) => {
-      let group = null
-
-      // Toleransi mengikuti ukuran bubble
-      const xTolerance =
-        Math.max(
-          5,
-          Math.min(
-            11,
-            medianRadius * 1.25
-          )
+      const startY =
+        Math.round(
+          250 * scaleY
         )
 
-      for (const existing of xGroups) {
-        if (
-          Math.abs(
-            existing.centerX -
-              bubble.x
-          ) <= xTolerance
+      const endY =
+        Math.round(
+          430 * scaleY
+        )
+
+      const startX =
+        Math.round(
+          45 * scaleX
+        )
+
+      const endX =
+        Math.round(
+          855 * scaleX
+        )
+
+      let bestY =
+        Math.round(
+          346 * scaleY
+        )
+
+      let bestScore = 0
+
+      for (
+        let y = startY;
+        y <= endY;
+        y++
+      ) {
+
+        let darkCount = 0
+        let longestRun = 0
+        let currentRun = 0
+
+        for (
+          let x = startX;
+          x <= endX;
+          x++
         ) {
-          group = existing
-          break
-        }
-      }
 
-      if (!group) {
-        group = {
-          centerX: bubble.x,
-          bubbles: []
-        }
+          const value =
+            gray.ucharPtr(
+              y,
+              x
+            )[0]
 
-        xGroups.push(group)
-      }
-
-      group.bubbles.push(bubble)
-
-      group.centerX =
-        group.bubbles.reduce(
-          (sum, item) =>
-            sum + item.x,
-          0
-        ) /
-        group.bubbles.length
-    })
-
-    xGroups.sort(
-      (a, b) =>
-        a.centerX -
-        b.centerX
-    )
-
-    // =====================================================
-    // FILTER TRACK
-    //
-    // Track asli punya banyak bubble.
-    // Noise biasanya jauh lebih sedikit.
-    // =====================================================
-
-    const minimumTrackBubble =
-      Math.max(
-        8,
-        Math.floor(
-          totalQuestions /
-            columnCount *
-            0.35
-        )
-      )
-
-    let validTracks =
-      xGroups.filter(
-        (group) =>
-          group.bubbles.length >=
-          minimumTrackBubble
-      )
-
-    // =====================================================
-    // KALAU TERLALU BANYAK TRACK,
-    // PILIH TRACK YANG PALING KUAT
-    // =====================================================
-
-    const expectedTrackCount =
-      columnCount * 5
-
-    if (
-      validTracks.length >
-      expectedTrackCount
-    ) {
-      validTracks =
-        [...validTracks]
-          .sort(
-            (a, b) =>
-              b.bubbles.length -
-              a.bubbles.length
-          )
-          .slice(
-            0,
-            expectedTrackCount
-          )
-          .sort(
-            (a, b) =>
-              a.centerX -
-              b.centerX
-          )
-    }
-
-    if (
-      validTracks.length <
-      expectedTrackCount
-    ) {
-      return {
-        answers: {},
-        debug:
-          `❌ Grid A-E belum lengkap. ` +
-          `Track ditemukan ${validTracks.length}/${expectedTrackCount}. ` +
-          `Bubble terdeteksi ${candidates.length}.`
-      }
-    }
-
-    // =====================================================
-    // STEP 2
-    // BAGI TRACK MENJADI KOLOM
-    // =====================================================
-
-    const gaps = []
-
-    for (
-      let i = 1;
-      i < validTracks.length;
-      i++
-    ) {
-      gaps.push({
-        index: i,
-        gap:
-          validTracks[i].centerX -
-          validTracks[i - 1].centerX
-      })
-    }
-
-    // Gap antar kolom biasanya
-    // jauh lebih besar daripada
-    // jarak A-B-C-D-E.
-    const separators =
-      [...gaps]
-        .sort(
-          (a, b) =>
-            b.gap - a.gap
-        )
-        .slice(
-          0,
-          columnCount - 1
-        )
-        .map(
-          (item) => item.index
-        )
-        .sort(
-          (a, b) => a - b
-        )
-
-    const columns = []
-
-    let startIndex = 0
-
-    separators.forEach(
-      (separator) => {
-        columns.push(
-          validTracks.slice(
-            startIndex,
-            separator
-          )
-        )
-
-        startIndex =
-          separator
-      }
-    )
-
-    columns.push(
-      validTracks.slice(
-        startIndex
-      )
-    )
-
-    // =====================================================
-    // VALIDASI KOLOM
-    // =====================================================
-
-    if (
-      columns.length !==
-      columnCount
-    ) {
-      return {
-        answers: {},
-        debug:
-          `❌ Kolom LJK tidak terbaca dengan benar. ` +
-          `Ditemukan ${columns.length}, ` +
-          `seharusnya ${columnCount}.`
-      }
-    }
-
-    // Kalau ada kolom bukan 5 track,
-    // coba ambil 5 track terkuat.
-    const finalColumns =
-      columns.map((column) => {
-        if (column.length === 5) {
-          return column.sort(
-            (a, b) =>
-              a.centerX -
-              b.centerX
-          )
-        }
-
-        if (column.length > 5) {
-          return [...column]
-            .sort(
-              (a, b) =>
-                b.bubbles.length -
-                a.bubbles.length
-            )
-            .slice(0, 5)
-            .sort(
-              (a, b) =>
-                a.centerX -
-                b.centerX
-            )
-        }
-
-        return column
-      })
-
-    if (
-      finalColumns.some(
-        (column) =>
-          column.length !== 5
-      )
-    ) {
-      return {
-        answers: {},
-        debug:
-          "❌ Salah satu kolom tidak mempunyai 5 track A-E."
-      }
-    }
-
-    // =====================================================
-    // STEP 3
-    // TENTUKAN JUMLAH BARIS PER KOLOM
-    //
-    // HARUS SAMA DENGAN AnswerSheet:
-    //
-    // Math.ceil(count / columnCount)
-    // =====================================================
-
-    const questionsPerColumn =
-      Math.ceil(
-        totalQuestions /
-          columnCount
-      )
-
-    // Contoh 100:
-    // kolom 1 = 34
-    // kolom 2 = 34
-    // kolom 3 = 32
-    //
-    // Contoh 45:
-    // kolom 1 = 23
-    // kolom 2 = 22
-
-    const rowsPerColumn =
-      finalColumns.map(
-        (_, index) => {
-          const start =
-            index *
-            questionsPerColumn
-
-          return Math.min(
-            questionsPerColumn,
-            totalQuestions -
-              start
-          )
-        }
-      )
-
-    // =====================================================
-    // STEP 4
-    // CARI POSISI Y BARIS
-    //
-    // Kita gabungkan bubble dari
-    // 5 track dan cari cluster Y.
-    // =====================================================
-
-    const findRowsForColumn = (
-      column
-    ) => {
-      const allBubbles = []
-
-      column.forEach(
-        (track) => {
-          track.bubbles.forEach(
-            (bubble) => {
-              allBubbles.push(
-                bubble
-              )
-            }
-          )
-        }
-      )
-
-      allBubbles.sort(
-        (a, b) =>
-          a.y - b.y
-      )
-
-      const yGroups = []
-
-      // Karena bubble sangat rapat,
-      // toleransi harus kecil.
-      const yTolerance =
-        Math.max(
-          3.5,
-          Math.min(
-            7,
-            medianRadius * 0.9
-          )
-        )
-
-      allBubbles.forEach(
-        (bubble) => {
-          let nearest = null
-          let nearestDistance =
-            Infinity
-
-          for (
-            const group of yGroups
+          // Garis cetakan hitam
+          if (
+            value < 130
           ) {
-            const distance =
-              Math.abs(
-                group.centerY -
-                  bubble.y
-              )
+            darkCount++
+            currentRun++
 
             if (
-              distance <
-                yTolerance &&
-              distance <
-                nearestDistance
+              currentRun >
+              longestRun
             ) {
-              nearest = group
-              nearestDistance =
-                distance
-            }
-          }
-
-          if (!nearest) {
-            nearest = {
-              centerY: bubble.y,
-              bubbles: []
+              longestRun =
+                currentRun
             }
 
-            yGroups.push(
-              nearest
-            )
+          } else {
+            currentRun = 0
           }
+        }
 
-          nearest.bubbles.push(
-            bubble
+        const totalWidth =
+          endX - startX + 1
+
+        const darkRatio =
+          darkCount /
+          totalWidth
+
+        // Garis horizontal panjang
+        // biasanya mempunyai run panjang.
+        const score =
+          darkRatio * 0.4 +
+          (longestRun /
+            totalWidth) *
+            0.6
+
+        if (
+          score >
+          bestScore
+        ) {
+          bestScore = score
+          bestY = y
+        }
+      }
+
+      return bestY
+    }
+
+    const sectionLineY =
+      findQuestionSectionLine()
+
+    // =====================================================
+    // POSISI BARIS PERTAMA
+    //
+    // Setelah garis section:
+    //
+    // margin-bottom = 2mm
+    // lalu question-row
+    //
+    // Kita ambil titik tengah baris pertama.
+    // =====================================================
+
+    const firstRowCenterY =
+      sectionLineY +
+      2 * pxPerMmY +
+      (rowHeightMm *
+        pxPerMmY) /
+        2
+
+    // =====================================================
+    // POSISI X BUBBLE
+    //
+    // Berdasarkan AnswerSheet.jsx:
+    //
+    // 2 kolom:
+    // nomor = 9mm
+    // margin = 1.5mm
+    // setiap pilihan = 10mm
+    //
+    // 3 kolom:
+    // nomor = 7mm
+    // margin = 1.5mm
+    // setiap pilihan = 7.2mm
+    // =====================================================
+
+    const getBubbleXPositions = (
+      columnIndex
+    ) => {
+
+      const contentLeftMm =
+        15
+
+      const contentWidthMm =
+        180
+
+      const columnGapMm =
+        columnCount === 3
+          ? 5
+          : 10
+
+      const columnWidthMm =
+        (
+          contentWidthMm -
+          columnGapMm *
+            (columnCount - 1)
+        ) /
+        columnCount
+
+      const columnStartMm =
+        contentLeftMm +
+        columnIndex *
+          (
+            columnWidthMm +
+            columnGapMm
           )
 
-          nearest.centerY =
-            nearest.bubbles.reduce(
-              (sum, item) =>
-                sum + item.y,
-              0
-            ) /
-            nearest.bubbles.length
-        }
-      )
+      // -------------------------------
+      // 2 KOLOM
+      // -------------------------------
 
-      yGroups.sort(
-        (a, b) =>
-          a.centerY -
-          b.centerY
-      )
+      if (
+        columnCount === 2
+      ) {
 
-      // ===================================================
-      // HANYA ROW YANG DIDUKUNG MINIMAL 3 TRACK
-      // ===================================================
+        const firstBubbleOffsetMm =
+          9 +
+          1.5 +
+          5
 
-      const validRows =
-        yGroups.filter(
-          (row) => {
-            let matchedTracks = 0
+        const choiceWidthMm =
+          10
 
-            column.forEach(
-              (track) => {
-                const found =
-                  row.bubbles.some(
-                    (bubble) =>
-                      Math.abs(
-                        bubble.x -
-                          track.centerX
-                      ) <= 10
-                  )
-
-                if (found) {
-                  matchedTracks++
-                }
-              }
-            )
-
-            return (
-              matchedTracks >= 3
-            )
-          }
+        return Array.from(
+          {
+            length: 5,
+          },
+          (_, index) =>
+            (
+              columnStartMm +
+              firstBubbleOffsetMm +
+              index *
+                choiceWidthMm
+            ) *
+            pxPerMmX
         )
-
-      return validRows
-    }
-
-    // =====================================================
-    // STEP 5
-    // NORMALISASI BARIS
-    //
-    // Kalau Hough menghasilkan beberapa
-    // baris tambahan, kita menggunakan
-    // jumlah baris yang memang dibutuhkan.
-    // =====================================================
-
-    const columnRows =
-      finalColumns.map(
-        (
-          column,
-          columnIndex
-        ) => {
-          const detectedRows =
-            findRowsForColumn(
-              column
-            )
-
-          const expectedRows =
-            rowsPerColumn[
-              columnIndex
-            ]
-
-          if (
-            detectedRows.length >=
-            expectedRows
-          ) {
-            return detectedRows.slice(
-              0,
-              expectedRows
-            )
-          }
-
-          return detectedRows
-        }
-      )
-
-    // =====================================================
-    // VALIDASI JUMLAH ROW
-    // =====================================================
-
-    const detectedRowCounts =
-      columnRows.map(
-        (rows) =>
-          rows.length
-      )
-
-    const totalDetectedRows =
-      detectedRowCounts.reduce(
-        (sum, value) =>
-          sum + value,
-        0
-      )
-
-    // Kita tidak langsung gagal kalau
-    // beberapa row tidak terbaca.
-    //
-    // Row yang tidak terbaca nantinya
-    // dianggap kosong.
-    if (
-      totalDetectedRows <
-      Math.floor(
-        totalQuestions * 0.7
-      )
-    ) {
-      return {
-        answers: {},
-        debug:
-          `❌ Baris LJK terlalu sedikit. ` +
-          `Terdeteksi ${totalDetectedRows}/${totalQuestions}. ` +
-          `Track ${validTracks.length}/${expectedTrackCount}.`
       }
+
+      // -------------------------------
+      // 3 KOLOM
+      // -------------------------------
+
+      const firstBubbleOffsetMm =
+        7 +
+        1.5 +
+        3.6
+
+      const choiceWidthMm =
+        7.2
+
+      return Array.from(
+        {
+          length: 5,
+        },
+        (_, index) =>
+          (
+            columnStartMm +
+            firstBubbleOffsetMm +
+            index *
+              choiceWidthMm
+          ) *
+          pxPerMmX
+      )
     }
 
     // =====================================================
-    // STEP 6
-    // FUNGSI MENGUKUR TINTA
+    // UKUR TINTA
     //
-    // PENTING:
-    // Kita hanya membaca BAGIAN TENGAH
-    // bubble.
+    // HANYA bagian tengah bubble.
     //
-    // Garis lingkaran cetakan berada
-    // di luar area ini sehingga tidak
-    // mudah dianggap sebagai arsiran.
+    // Lingkaran cetakan berada di bagian luar,
+    // sehingga tidak ikut dihitung.
     // =====================================================
 
     const measureInk = (
       centerX,
       centerY
     ) => {
-      // Bagian tengah bubble
-      const centerRadius =
+
+      const bubbleDiameter =
+        bubbleSizeMm *
+        pxPerMmX
+
+      // Ambil sekitar 30% diameter
+      // supaya hanya bagian tengah.
+      const radius =
         Math.max(
-          1.8,
-          Math.min(
-            5,
-            medianRadius * 0.42
-          )
+          3,
+          bubbleDiameter *
+            0.30
         )
 
-      // Area sedikit lebih besar
-      // untuk membandingkan background.
       const outerRadius =
-        centerRadius * 1.8
-
-      let centerDark = 0
-      let centerTotal = 0
-
-      let outerDark = 0
-      let outerTotal = 0
-
-      const centerR2 =
-        centerRadius *
-        centerRadius
-
-      const outerR2 =
-        outerRadius *
-        outerRadius
+        radius *
+        1.8
 
       const startX =
         Math.floor(
@@ -1238,11 +974,18 @@ const readStudentAnswers = (canvas, totalQuestions) => {
             outerRadius
         )
 
+      let centerDark = 0
+      let centerTotal = 0
+
+      let outerBrightness = 0
+      let outerTotal = 0
+
       for (
         let y = startY;
         y <= endY;
         y++
       ) {
+
         if (
           y < 0 ||
           y >= gray.rows
@@ -1255,6 +998,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
           x <= endX;
           x++
         ) {
+
           if (
             x < 0 ||
             x >= gray.cols
@@ -1268,16 +1012,11 @@ const readStudentAnswers = (canvas, totalQuestions) => {
           const dy =
             y - centerY
 
-          const distance2 =
-            dx * dx +
-            dy * dy
-
-          if (
-            distance2 >
-            outerR2
-          ) {
-            continue
-          }
+          const distance =
+            Math.sqrt(
+              dx * dx +
+              dy * dy
+            )
 
           const value =
             gray.ucharPtr(
@@ -1285,65 +1024,114 @@ const readStudentAnswers = (canvas, totalQuestions) => {
               x
             )[0]
 
-          const dark =
-            value < 165
+          // -------------------------------
+          // TENGAH BUBBLE
+          // -------------------------------
 
-          // Bagian tengah
           if (
-            distance2 <=
-            centerR2
+            distance <= radius
           ) {
+
             centerTotal++
 
-            if (dark) {
+            if (
+              value < 165
+            ) {
               centerDark++
             }
-          } else {
-            // Bagian luar hanya
-            // untuk melihat garis bubble.
-            outerTotal++
 
-            if (dark) {
-              outerDark++
-            }
+          }
+
+          // -------------------------------
+          // AREA LUAR
+          //
+          // Untuk mengetahui kondisi
+          // pencahayaan lokal.
+          //
+          // Tidak terlalu dekat dengan
+          // garis bubble.
+          // -------------------------------
+
+          else if (
+            distance >=
+              radius * 1.35 &&
+            distance <=
+              outerRadius
+          ) {
+
+            outerBrightness +=
+              value
+
+            outerTotal++
           }
         }
       }
 
-      const centerRatio =
-        centerTotal > 0
-          ? centerDark /
-            centerTotal
-          : 0
+      if (
+        centerTotal === 0
+      ) {
+        return {
+          score: 0,
+          darkRatio: 0,
+          meanGray: 255,
+        }
+      }
 
-      const outerRatio =
+      const darkRatio =
+        centerDark /
+        centerTotal
+
+      const meanGray =
+        255 -
+        (
+          darkRatio *
+          120
+        )
+
+      const localBrightness =
         outerTotal > 0
-          ? outerDark /
+          ? outerBrightness /
             outerTotal
-          : 0
+          : 220
 
-      // Nilai utama = tinta tengah.
+      // -------------------------------
+      // KONTRAS LOKAL
       //
-      // Kita beri sedikit bonus kalau
-      // tengah jauh lebih gelap
-      // daripada area luar.
-      const inkScore =
-        centerRatio -
-        outerRatio * 0.15
+      // Kalau tengah jauh lebih gelap
+      // daripada sekitarnya, kemungkinan
+      // besar adalah tinta.
+      // -------------------------------
+
+      const contrast =
+        Math.max(
+          0,
+          (
+            localBrightness -
+            meanGray
+          ) / 255
+        )
+
+      // -------------------------------
+      // SCORE
+      //
+      // Dark ratio = faktor utama.
+      // Contrast = faktor tambahan.
+      // -------------------------------
+
+      const score =
+        darkRatio * 0.80 +
+        contrast * 0.20
 
       return {
-        centerRatio,
-        outerRatio,
-        score: Math.max(
-          0,
-          inkScore
-        )
+        score,
+        darkRatio,
+        meanGray,
+        contrast,
       }
     }
 
     // =====================================================
-    // STEP 7
-    // BUAT GRID JAWABAN
+    // BACA SEMUA JAWABAN
     // =====================================================
 
     const choices = [
@@ -1351,7 +1139,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       "B",
       "C",
       "D",
-      "E"
+      "E",
     ]
 
     const answers = {}
@@ -1361,227 +1149,188 @@ const readStudentAnswers = (canvas, totalQuestions) => {
 
     const inkDebug = []
 
-    let globalQuestion = 1
-
     // =====================================================
-    // PROSES SETIAP KOLOM
+    // PROSES PER KOLOM
     // =====================================================
 
-    finalColumns.forEach(
-      (
-        column,
-        columnIndex
-      ) => {
-        const rows =
-          columnRows[
-            columnIndex
-          ]
+    let questionNumber = 1
 
-        const expectedRows =
-          rowsPerColumn[
-            columnIndex
-          ]
+    for (
+      let columnIndex = 0;
+      columnIndex <
+      columnCount;
+      columnIndex++
+    ) {
 
-        for (
-          let rowIndex = 0;
-          rowIndex <
-          expectedRows;
-          rowIndex++
-        ) {
-          // -----------------------------------------------
-          // Kalau row tidak ditemukan
-          // -----------------------------------------------
+      const rowCount =
+        rowsPerColumn[
+          columnIndex
+        ]
 
-          const row =
-            rows[rowIndex]
+      const xPositions =
+        getBubbleXPositions(
+          columnIndex
+        )
 
-          if (!row) {
-            answers[
-              globalQuestion
-            ] = ""
+      // ===================================================
+      // PROSES SETIAP BARIS
+      // ===================================================
 
-            globalQuestion++
+      for (
+        let rowIndex = 0;
+        rowIndex < rowCount;
+        rowIndex++
+      ) {
 
-            continue
-          }
+        const centerY =
+          firstRowCenterY +
+          rowIndex *
+            rowHeightMm *
+            pxPerMmY
 
-          // -----------------------------------------------
-          // Tentukan Y sebenarnya
-          // -----------------------------------------------
+        // -----------------------------------------------
+        // UKUR TINTA A-E
+        // -----------------------------------------------
 
-          const rowY =
-            row.centerY
+        const measurements =
+          xPositions.map(
+            (x) =>
+              measureInk(
+                x,
+                centerY
+              )
+          )
 
-          // -----------------------------------------------
-          // Ukur tinta A-E
-          // -----------------------------------------------
+        const scores =
+          measurements.map(
+            (item) =>
+              item.score
+          )
 
-          const measurements =
-            column.map(
-              (track) => {
-                return measureInk(
-                  track.centerX,
-                  rowY
-                )
-              }
-            )
+        // -----------------------------------------------
+        // URUTKAN SCORE
+        // -----------------------------------------------
 
-          const scores =
-            measurements.map(
+        const sorted =
+          [...scores].sort(
+            (a, b) =>
+              b - a
+          )
+
+        const highest =
+          sorted[0] || 0
+
+        const second =
+          sorted[1] || 0
+
+        const highestIndex =
+          scores.indexOf(
+            highest
+          )
+
+        // -----------------------------------------------
+        // DEBUG
+        // -----------------------------------------------
+
+        inkDebug.push(
+          `${questionNumber}:` +
+          measurements
+            .map(
               (item) =>
                 item.score
+                  .toFixed(2)
             )
+            .join("/")
+        )
 
-          // -----------------------------------------------
-          // Cari nilai tertinggi
-          // -----------------------------------------------
+        // =================================================
+        // TENTUKAN KOSONG
+        //
+        // Nilai harus cukup tinggi.
+        // =================================================
 
-          let highestIndex = 0
+        const EMPTY_THRESHOLD =
+          0.15
 
-          for (
-            let i = 1;
-            i < scores.length;
-            i++
-          ) {
-            if (
-              scores[i] >
-              scores[
-                highestIndex
-              ]
-            ) {
-              highestIndex = i
-            }
-          }
+        // =================================================
+        // TENTUKAN DOUBLE
+        //
+        // Dua bubble harus sama-sama
+        // benar-benar gelap.
+        // =================================================
 
-          const highest =
-            scores[
+        const isDouble =
+          highest >= 0.22 &&
+          second >= 0.16 &&
+          second >=
+            highest * 0.72
+
+        if (
+          highest <
+          EMPTY_THRESHOLD
+        ) {
+
+          answers[
+            questionNumber
+          ] = ""
+
+        } else if (
+          isDouble
+        ) {
+
+          answers[
+            questionNumber
+          ] = ""
+
+          doubleCount++
+
+        } else {
+
+          answers[
+            questionNumber
+          ] =
+            choices[
               highestIndex
             ]
 
-          // Nilai kedua
-          const sortedScores =
-            [...scores].sort(
-              (a, b) =>
-                b - a
-            )
-
-          const second =
-            sortedScores[1] || 0
-
-          // -----------------------------------------------
-          // DEBUG
-          // -----------------------------------------------
-
-          inkDebug.push(
-            `${globalQuestion}:` +
-            scores
-              .map(
-                (value) =>
-                  value.toFixed(2)
-              )
-              .join("/")
-          )
-
-          // =================================================
-          // TENTUKAN KOSONG
-          //
-          // Bubble kosong biasanya hanya
-          // mempunyai sedikit tinta di tengah.
-          // =================================================
-
-          const EMPTY_THRESHOLD =
-            0.10
-
-          if (
-            highest <
-            EMPTY_THRESHOLD
-          ) {
-            answers[
-              globalQuestion
-            ] = ""
-          }
-
-          // =================================================
-          // DETEKSI DOUBLE
-          //
-          // Tidak menggunakan 0.78 lagi.
-          // Harus benar-benar sangat dekat.
-          // =================================================
-
-          else if (
-            highest > 0.22 &&
-            second >
-              highest * 0.92 &&
-            highest -
-              second <
-              0.08
-          ) {
-            answers[
-              globalQuestion
-            ] = ""
-
-            doubleCount++
-          }
-
-          // =================================================
-          // JAWABAN NORMAL
-          // =================================================
-
-          else {
-            answers[
-              globalQuestion
-            ] =
-              choices[
-                highestIndex
-              ]
-
-            answeredCount++
-          }
-
-          globalQuestion++
+          answeredCount++
         }
+
+        questionNumber++
       }
-    )
+    }
 
     // =====================================================
     // DEBUG
     // =====================================================
 
-    const trackDebug =
-      finalColumns
-        .map(
-          (column) =>
-            column.length
-        )
-        .join("/")
-
-    const rowDebug =
-      columnRows
-        .map(
-          (rows) =>
-            rows.length
-        )
-        .join("/")
+    const columnDebug =
+      rowsPerColumn.join("/")
 
     const debug =
-      `🔲 Grid LJK` +
-      ` | Bubble referensi: ${candidates.length}` +
-      ` | Track: ${validTracks.length}/${expectedTrackCount}` +
-      ` | Kolom: ${trackDebug}` +
-      ` | Baris: ${rowDebug}` +
+      `🔲 Grid LJK Tetap` +
+      ` | Kolom: ${columnCount}` +
+      ` | Baris: ${columnDebug}` +
       ` | Terbaca: ${answeredCount}/${totalQuestions}` +
       ` | Ganda: ${doubleCount}`
 
     console.log(
-      "================================"
+      "===================================="
     )
 
     console.log(
-      "GRID LJK"
+      "GRID LJK TETAP"
     )
 
     console.log(
-      "Total soal:",
+      "Ukuran:",
+      width,
+      "x",
+      height
+    )
+
+    console.log(
+      "Jumlah soal:",
       totalQuestions
     )
 
@@ -1591,21 +1340,39 @@ const readStudentAnswers = (canvas, totalQuestions) => {
     )
 
     console.log(
-      "Track:",
-      finalColumns.map(
-        (column) =>
-          column.map(
-            (track) =>
-              Math.round(
-                track.centerX
-              )
-          )
+      "Baris:",
+      rowsPerColumn
+    )
+
+    console.log(
+      "Section line Y:",
+      Math.round(
+        sectionLineY
       )
     )
 
     console.log(
-      "Baris:",
-      rowDebug
+      "First row Y:",
+      Math.round(
+        firstRowCenterY
+      )
+    )
+
+    console.log(
+      "X bubble:",
+      Array.from(
+        {
+          length:
+            columnCount,
+        },
+        (_, index) =>
+          getBubbleXPositions(
+            index
+          ).map(
+            (x) =>
+              Math.round(x)
+          )
+      )
     )
 
     console.log(
@@ -1619,34 +1386,43 @@ const readStudentAnswers = (canvas, totalQuestions) => {
     )
 
     console.log(
-      "================================"
+      "===================================="
     )
 
     return {
       answers,
-      debug
+      debug,
     }
 
   } catch (error) {
+
     console.error(
-      "ERROR GRID LJK:",
+      "ERROR GRID LJK TETAP:",
       error
     )
 
     return {
       answers: {},
       debug:
-        `❌ Gagal membaca grid LJK: ${
+        `❌ Gagal membaca LJK: ${
           error?.message ||
           "error tidak diketahui"
-        }`
+        }`,
     }
 
   } finally {
-    if (src) src.delete()
-    if (gray) gray.delete()
-    if (blurred) blurred.delete()
-    if (circles) circles.delete()
+
+    if (src) {
+      src.delete()
+    }
+
+    if (gray) {
+      gray.delete()
+    }
+
+    if (blurred) {
+      blurred.delete()
+    }
   }
 }
 
