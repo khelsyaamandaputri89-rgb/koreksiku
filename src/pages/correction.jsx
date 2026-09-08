@@ -408,8 +408,8 @@ const warpAnswerSheet = (canvas, markers) => {
 
   try {
     src = cv.imread(canvas)
-    const width = 900
-    const height = 1200
+    const width = 840
+    const height = 1320
 
     // Pakai langsung hasil dari detectAnswerSheet, jangan dihitung ulang
     const srcPoints = [
@@ -478,10 +478,15 @@ const readStudentAnswers = (
   canvas,
   totalQuestions
 ) => {
-  if (!window.cv || !window.cv.Mat) {
+
+  if (
+    !window.cv ||
+    !window.cv.Mat
+  ) {
     return {
       answers: {},
-      debug: "❌ OpenCV belum siap."
+      debug:
+        "OpenCV belum siap."
     }
   }
 
@@ -492,105 +497,6 @@ const readStudentAnswers = (
   let blurred = null
 
   try {
-
-    // =====================================================
-    // VALIDASI JUMLAH SOAL
-    // =====================================================
-
-    const supportedTotals = [
-      40,
-      45,
-      50,
-      60,
-      70,
-      80,
-      90,
-      100,
-    ]
-
-    if (
-      !supportedTotals.includes(
-        totalQuestions
-      )
-    ) {
-      return {
-        answers: {},
-        debug:
-          `❌ Jumlah soal ${totalQuestions} ` +
-          `belum didukung.`,
-      }
-    }
-
-    // =====================================================
-    // UKURAN CANVAS HASIL WARP
-    // =====================================================
-
-    const width = canvas.width
-    const height = canvas.height
-
-    // LJK kita di-warp menjadi 900 x 1200
-    // Jadi semua koordinat dibuat berdasarkan
-    // ukuran tersebut.
-
-    const baseWidth = 900
-    const baseHeight = 1200
-
-    const scaleX =
-      width / baseWidth
-
-    const scaleY =
-      height / baseHeight
-
-    // =====================================================
-    // JUMLAH KOLOM
-    //
-    // Sama seperti AnswerSheet.jsx
-    // =====================================================
-
-    const columnCount =
-      totalQuestions >= 80
-        ? 3
-        : 2
-
-    // =====================================================
-    // JUMLAH SOAL PER KOLOM
-    //
-    // Contoh:
-    //
-    // 45 -> 23 / 22
-    // 50 -> 25 / 25
-    // 60 -> 30 / 30
-    // 70 -> 35 / 35
-    //
-    // 80 -> 27 / 27 / 26
-    // 90 -> 30 / 30 / 30
-    // 100 -> 34 / 34 / 32
-    // =====================================================
-
-    const questionsPerColumn =
-      Math.ceil(
-        totalQuestions /
-          columnCount
-      )
-
-    const rowsPerColumn =
-      Array.from(
-        {
-          length:
-            columnCount,
-        },
-        (_, index) => {
-          const start =
-            index *
-            questionsPerColumn
-
-          return Math.min(
-            questionsPerColumn,
-            totalQuestions -
-              start
-          )
-        }
-      )
 
     // =====================================================
     // BACA GAMBAR
@@ -616,38 +522,56 @@ const readStudentAnswers = (
     )
 
     // =====================================================
-    // TENTUKAN UKURAN BARIS
-    //
+    // KONFIGURASI SESUAI ANSWER SHEET
+    // =====================================================
+
+    const columnCount =
+      totalQuestions >= 80
+        ? 3
+        : 2
+
+    const questionsPerColumn =
+      Math.ceil(
+        totalQuestions /
+          columnCount
+      )
+
+    // =====================================================
+    // JUMLAH BARIS TIAP KOLOM
     // HARUS SAMA DENGAN AnswerSheet.jsx
     // =====================================================
 
-    let rowHeightMm = 5.5
+    const rowsPerColumn =
+      Array.from(
+        {
+          length:
+            columnCount
+        },
+        (_, index) => {
 
-    if (
-      totalQuestions >= 100
-    ) {
-      rowHeightMm = 4.8
-    } else if (
-      totalQuestions >= 80
-    ) {
-      rowHeightMm = 4.8
-    } else if (
-      totalQuestions >= 70
-    ) {
-      rowHeightMm = 5
-    } else if (
-      totalQuestions >= 60
-    ) {
-      rowHeightMm = 5
-    }
+          const start =
+            index *
+            questionsPerColumn
+
+          const end =
+            Math.min(
+              start +
+                questionsPerColumn,
+              totalQuestions
+            )
+
+          return (
+            end - start
+          )
+        }
+      )
 
     // =====================================================
     // UKURAN BUBBLE
-    //
-    // HARUS SAMA DENGAN AnswerSheet.jsx
+    // SAMA DENGAN AnswerSheet.jsx
     // =====================================================
 
-    let bubbleSizeMm = 5
+    let bubbleSizeMm
 
     if (
       totalQuestions >= 100
@@ -665,324 +589,200 @@ const readStudentAnswers = (
       totalQuestions >= 70
     ) {
       bubbleSizeMm = 4.5
+    } else {
+      bubbleSizeMm = 5
+    }
+
+    // =====================================================
+    // JARAK BARIS
+    // SAMA DENGAN AnswerSheet.jsx
+    // =====================================================
+
+    let rowHeightMm
+
+    if (
+      totalQuestions >= 80
+    ) {
+      rowHeightMm = 4.8
+    } else if (
+      totalQuestions >= 60
+    ) {
+      rowHeightMm = 5
+    } else {
+      rowHeightMm = 5.5
     }
 
     // =====================================================
     // KONVERSI MM -> PIXEL
     //
-    // LJK:
-    // 210mm x 330mm
+    // WARP = 840 x 1320
+    // F4 = 210 x 330
     //
-    // Warp:
-    // 900 x 1200
+    // 4 pixel = 1mm
     // =====================================================
 
-    const pxPerMmX =
-      width / 210
+    const pxPerMm =
+      canvas.width / 210
 
-    const pxPerMmY =
-      height / 330
-
-    // =====================================================
-    // CARI GARIS PEMBATAS
-    // "PILIHAN GANDA"
-    //
-    // Garis ini berada tepat sebelum
-    // baris soal pertama.
-    //
-    // Kita cari garis horizontal panjang
-    // supaya posisi Y tetap akurat walaupun
-    // hasil foto sedikit berubah.
-    // =====================================================
-
-    const findQuestionSectionLine = () => {
-
-      const startY =
-        Math.round(
-          250 * scaleY
-        )
-
-      const endY =
-        Math.round(
-          430 * scaleY
-        )
-
-      const startX =
-        Math.round(
-          45 * scaleX
-        )
-
-      const endX =
-        Math.round(
-          855 * scaleX
-        )
-
-      let bestY =
-        Math.round(
-          346 * scaleY
-        )
-
-      let bestScore = 0
-
-      for (
-        let y = startY;
-        y <= endY;
-        y++
-      ) {
-
-        let darkCount = 0
-        let longestRun = 0
-        let currentRun = 0
-
-        for (
-          let x = startX;
-          x <= endX;
-          x++
-        ) {
-
-          const value =
-            gray.ucharPtr(
-              y,
-              x
-            )[0]
-
-          // Garis cetakan hitam
-          if (
-            value < 130
-          ) {
-            darkCount++
-            currentRun++
-
-            if (
-              currentRun >
-              longestRun
-            ) {
-              longestRun =
-                currentRun
-            }
-
-          } else {
-            currentRun = 0
-          }
-        }
-
-        const totalWidth =
-          endX - startX + 1
-
-        const darkRatio =
-          darkCount /
-          totalWidth
-
-        // Garis horizontal panjang
-        // biasanya mempunyai run panjang.
-        const score =
-          darkRatio * 0.4 +
-          (longestRun /
-            totalWidth) *
-            0.6
-
-        if (
-          score >
-          bestScore
-        ) {
-          bestScore = score
-          bestY = y
-        }
-      }
-
-      return bestY
-    }
-
-    const sectionLineY =
-      findQuestionSectionLine()
-
-    // =====================================================
-    // POSISI BARIS PERTAMA
-    //
-    // Setelah garis section:
-    //
-    // margin-bottom = 2mm
-    // lalu question-row
-    //
-    // Kita ambil titik tengah baris pertama.
-    // =====================================================
-
-    const firstRowCenterY =
-      sectionLineY +
-      2 * pxPerMmY +
-      (rowHeightMm *
-        pxPerMmY) /
+    const bubbleRadius =
+      (
+        bubbleSizeMm /
         2
+      ) * pxPerMm
+
+    const rowHeight =
+      rowHeightMm *
+      pxPerMm
 
     // =====================================================
-    // POSISI X BUBBLE
+    // POSISI AWAL AREA PILIHAN GANDA
     //
-    // Berdasarkan AnswerSheet.jsx:
+    // Berdasarkan layout AnswerSheet.jsx
     //
-    // 2 kolom:
-    // nomor = 9mm
-    // margin = 1.5mm
-    // setiap pilihan = 10mm
-    //
-    // 3 kolom:
-    // nomor = 7mm
-    // margin = 1.5mm
-    // setiap pilihan = 7.2mm
+    // Kita mulai sedikit sebelum bubble
+    // kemudian nanti dicari posisi aktualnya.
     // =====================================================
 
-    const getBubbleXPositions = (
-      columnIndex
-    ) => {
+    const firstRowY =
+      canvas.height *
+      0.242
 
-      const contentLeftMm =
-        15
+    // =====================================================
+    // POSISI X AWAL
+    //
+    // 2 KOLOM
+    // =====================================================
 
-      const contentWidthMm =
-        180
+    let initialX
 
-      const columnGapMm =
-        columnCount === 3
-          ? 5
-          : 10
+    if (
+      columnCount === 2
+    ) {
 
-      const columnWidthMm =
-        (
-          contentWidthMm -
-          columnGapMm *
-            (columnCount - 1)
-        ) /
-        columnCount
+      initialX = [
+        [
+          0.138,
+          0.186,
+          0.233,
+          0.281,
+          0.329
+        ],
 
-      const columnStartMm =
-        contentLeftMm +
-        columnIndex *
-          (
-            columnWidthMm +
-            columnGapMm
-          )
+        [
+          0.590,
+          0.638,
+          0.686,
+          0.733,
+          0.781
+        ]
+      ]
 
-      // -------------------------------
-      // 2 KOLOM
-      // -------------------------------
-
-      if (
-        columnCount === 2
-      ) {
-
-        const firstBubbleOffsetMm =
-          9 +
-          1.5 +
-          5
-
-        const choiceWidthMm =
-          10
-
-        return Array.from(
-          {
-            length: 5,
-          },
-          (_, index) =>
-            (
-              columnStartMm +
-              firstBubbleOffsetMm +
-              index *
-                choiceWidthMm
-            ) *
-            pxPerMmX
-        )
-      }
-
-      // -------------------------------
-      // 3 KOLOM
-      // -------------------------------
-
-      const firstBubbleOffsetMm =
-        7 +
-        1.5 +
-        3.6
-
-      const choiceWidthMm =
-        7.2
-
-      return Array.from(
-        {
-          length: 5,
-        },
-        (_, index) =>
-          (
-            columnStartMm +
-            firstBubbleOffsetMm +
-            index *
-              choiceWidthMm
-          ) *
-          pxPerMmX
-      )
     }
 
     // =====================================================
-    // UKUR TINTA
-    //
-    // HANYA bagian tengah bubble.
-    //
-    // Lingkaran cetakan berada di bagian luar,
-    // sehingga tidak ikut dihitung.
+    // 3 KOLOM
     // =====================================================
 
-    const measureInk = (
+    else {
+
+      initialX = [
+        [
+          0.123,
+          0.157,
+          0.191,
+          0.226,
+          0.260
+        ],
+
+        [
+          0.417,
+          0.451,
+          0.485,
+          0.519,
+          0.554
+        ],
+
+        [
+          0.710,
+          0.744,
+          0.779,
+          0.813,
+          0.847
+        ]
+      ]
+
+    }
+
+    // =====================================================
+    // UBAH NORMALIZED X -> PIXEL
+    // =====================================================
+
+    const expectedX =
+      initialX.map(
+        (column) =>
+          column.map(
+            (value) =>
+              value *
+              canvas.width
+          )
+      )
+
+    // =====================================================
+    // FUNGSI CEK RING BUBBLE
+    //
+    // Yang dicari adalah garis lingkaran cetakan,
+    // bukan isi tengahnya.
+    // =====================================================
+
+    const ringScore = (
       centerX,
       centerY
     ) => {
 
-      const bubbleDiameter =
-        bubbleSizeMm *
-        pxPerMmX
-
-      // Ambil sekitar 30% diameter
-      // supaya hanya bagian tengah.
-      const radius =
+      const outerRadius =
         Math.max(
-          3,
-          bubbleDiameter *
-            0.30
+          4,
+          bubbleRadius *
+            1.05
         )
 
-      const outerRadius =
-        radius *
-        1.8
+      const innerRadius =
+        Math.max(
+          2,
+          bubbleRadius *
+            0.62
+        )
 
-      const startX =
+      let dark = 0
+      let total = 0
+
+      const minX =
         Math.floor(
           centerX -
             outerRadius
         )
 
-      const endX =
+      const maxX =
         Math.ceil(
           centerX +
             outerRadius
         )
 
-      const startY =
+      const minY =
         Math.floor(
           centerY -
             outerRadius
         )
 
-      const endY =
+      const maxY =
         Math.ceil(
           centerY +
             outerRadius
         )
 
-      let centerDark = 0
-      let centerTotal = 0
-
-      let outerBrightness = 0
-      let outerTotal = 0
-
       for (
-        let y = startY;
-        y <= endY;
+        let y = minY;
+        y <= maxY;
         y++
       ) {
 
@@ -994,8 +794,8 @@ const readStudentAnswers = (
         }
 
         for (
-          let x = startX;
-          x <= endX;
+          let x = minX;
+          x <= maxX;
           x++
         ) {
 
@@ -1018,120 +818,248 @@ const readStudentAnswers = (
               dy * dy
             )
 
+          // hanya area cincin
+          if (
+            distance <
+              innerRadius ||
+            distance >
+              outerRadius
+          ) {
+            continue
+          }
+
           const value =
             gray.ucharPtr(
               y,
               x
             )[0]
 
-          // -------------------------------
-          // TENGAH BUBBLE
-          // -------------------------------
-
           if (
-            distance <= radius
+            value < 190
           ) {
-
-            centerTotal++
-
-            if (
-              value < 165
-            ) {
-              centerDark++
-            }
-
+            dark++
           }
 
-          // -------------------------------
-          // AREA LUAR
-          //
-          // Untuk mengetahui kondisi
-          // pencahayaan lokal.
-          //
-          // Tidak terlalu dekat dengan
-          // garis bubble.
-          // -------------------------------
-
-          else if (
-            distance >=
-              radius * 1.35 &&
-            distance <=
-              outerRadius
-          ) {
-
-            outerBrightness +=
-              value
-
-            outerTotal++
-          }
+          total++
         }
       }
 
       if (
-        centerTotal === 0
+        total === 0
       ) {
-        return {
-          score: 0,
-          darkRatio: 0,
-          meanGray: 255,
-        }
+        return 0
       }
 
-      const darkRatio =
-        centerDark /
-        centerTotal
-
-      const meanGray =
-        255 -
-        (
-          darkRatio *
-          120
-        )
-
-      const localBrightness =
-        outerTotal > 0
-          ? outerBrightness /
-            outerTotal
-          : 220
-
-      // -------------------------------
-      // KONTRAS LOKAL
-      //
-      // Kalau tengah jauh lebih gelap
-      // daripada sekitarnya, kemungkinan
-      // besar adalah tinta.
-      // -------------------------------
-
-      const contrast =
-        Math.max(
-          0,
-          (
-            localBrightness -
-            meanGray
-          ) / 255
-        )
-
-      // -------------------------------
-      // SCORE
-      //
-      // Dark ratio = faktor utama.
-      // Contrast = faktor tambahan.
-      // -------------------------------
-
-      const score =
-        darkRatio * 0.80 +
-        contrast * 0.20
-
-      return {
-        score,
-        darkRatio,
-        meanGray,
-        contrast,
-      }
+      return (
+        dark / total
+      )
     }
 
     // =====================================================
-    // BACA SEMUA JAWABAN
+    // FUNGSI HITUNG TINTA
+    //
+    // HANYA BAGIAN TENGAH BUBBLE
+    //
+    // Jadi garis lingkaran cetakan tidak dihitung.
+    // =====================================================
+
+    const calculateInk = (
+      centerX,
+      centerY
+    ) => {
+
+      const radius =
+        Math.max(
+          2,
+          bubbleRadius *
+            0.43
+        )
+
+      let darkPixels = 0
+      let totalPixels = 0
+
+      const minX =
+        Math.floor(
+          centerX -
+            radius
+        )
+
+      const maxX =
+        Math.ceil(
+          centerX +
+            radius
+        )
+
+      const minY =
+        Math.floor(
+          centerY -
+            radius
+        )
+
+      const maxY =
+        Math.ceil(
+          centerY +
+            radius
+        )
+
+      for (
+        let y = minY;
+        y <= maxY;
+        y++
+      ) {
+
+        if (
+          y < 0 ||
+          y >= gray.rows
+        ) {
+          continue
+        }
+
+        for (
+          let x = minX;
+          x <= maxX;
+          x++
+        ) {
+
+          if (
+            x < 0 ||
+            x >= gray.cols
+          ) {
+            continue
+          }
+
+          const dx =
+            x - centerX
+
+          const dy =
+            y - centerY
+
+          if (
+            dx * dx +
+              dy * dy >
+            radius * radius
+          ) {
+            continue
+          }
+
+          const value =
+            gray.ucharPtr(
+              y,
+              x
+            )[0]
+
+          if (
+            value < 130
+          ) {
+            darkPixels++
+          }
+
+          totalPixels++
+        }
+      }
+
+      if (
+        totalPixels === 0
+      ) {
+        return 0
+      }
+
+      return (
+        darkPixels /
+        totalPixels
+      )
+    }
+
+    // =====================================================
+    // CARI POSISI X BUBBLE SEBENARNYA
+    //
+    // Kita tidak langsung percaya koordinat awal.
+    // Dicari sedikit ke kiri/kanan.
+    // =====================================================
+
+    const refinedX =
+      expectedX.map(
+        (
+          column
+        ) => {
+
+          return column.map(
+            (
+              expected
+            ) => {
+
+              let bestX =
+                expected
+
+              let bestScore =
+                -1
+
+              const search =
+                Math.max(
+                  6,
+                  bubbleRadius *
+                    1.5
+                )
+
+              for (
+                let dx = -search;
+                dx <= search;
+                dx += 1
+              ) {
+
+                const testX =
+                  expected +
+                  dx
+
+                let score = 0
+
+                // cek beberapa posisi
+                // baris di seluruh kolom
+                for (
+                  let row = 0;
+                  row <
+                    Math.min(
+                      8,
+                      rowsPerColumn[0]
+                    );
+                  row++
+                ) {
+
+                  const testY =
+                    firstRowY +
+                    (
+                      row *
+                      rowHeight
+                    )
+
+                  score +=
+                    ringScore(
+                      testX,
+                      testY
+                    )
+                }
+
+                if (
+                  score >
+                  bestScore
+                ) {
+
+                  bestScore =
+                    score
+
+                  bestX =
+                    testX
+                }
+              }
+
+              return bestX
+            }
+          )
+        }
+      )
+
+    // =====================================================
+    // JAWABAN
     // =====================================================
 
     const choices = [
@@ -1139,7 +1067,7 @@ const readStudentAnswers = (
       "B",
       "C",
       "D",
-      "E",
+      "E"
     ]
 
     const answers = {}
@@ -1147,18 +1075,33 @@ const readStudentAnswers = (
     let answeredCount = 0
     let doubleCount = 0
 
-    const inkDebug = []
-
-    // =====================================================
-    // PROSES PER KOLOM
-    // =====================================================
-
     let questionNumber = 1
+
+    // =====================================================
+    // THRESHOLD
+    //
+    // Karena yang dibaca adalah bagian TENGAH bubble,
+    // threshold bisa cukup rendah untuk pensil.
+    // =====================================================
+
+    const EMPTY_THRESHOLD =
+      totalQuestions >= 80
+        ? 0.16
+        : 0.14
+
+    const STRONG_THRESHOLD =
+      totalQuestions >= 80
+        ? 0.28
+        : 0.25
+
+    // =====================================================
+    // PROSES KOLOM
+    // =====================================================
 
     for (
       let columnIndex = 0;
       columnIndex <
-      columnCount;
+        columnCount;
       columnIndex++
     ) {
 
@@ -1167,105 +1110,180 @@ const readStudentAnswers = (
           columnIndex
         ]
 
-      const xPositions =
-        getBubbleXPositions(
-          columnIndex
-        )
-
       // ===================================================
-      // PROSES SETIAP BARIS
+      // CARI SETIAP BARIS
       // ===================================================
 
       for (
         let rowIndex = 0;
-        rowIndex < rowCount;
+        rowIndex <
+          rowCount;
         rowIndex++
       ) {
 
-        const centerY =
-          firstRowCenterY +
-          rowIndex *
-            rowHeightMm *
-            pxPerMmY
+        const expectedY =
+          firstRowY +
+          (
+            rowIndex *
+            rowHeight
+          )
 
-        // -----------------------------------------------
-        // UKUR TINTA A-E
-        // -----------------------------------------------
+        // ===============================================
+        // PERBAIKI POSISI Y
+        //
+        // Cari ring bubble terkuat
+        // di sekitar posisi seharusnya.
+        // ===============================================
 
-        const measurements =
-          xPositions.map(
-            (x) =>
-              measureInk(
-                x,
-                centerY
+        let bestY =
+          expectedY
+
+        let bestRowScore =
+          -1
+
+        const ySearch =
+          Math.max(
+            5,
+            rowHeight *
+              0.42
+          )
+
+        for (
+          let dy = -ySearch;
+          dy <= ySearch;
+          dy += 1
+        ) {
+
+          const testY =
+            expectedY +
+            dy
+
+          let score = 0
+
+          for (
+            let choiceIndex = 0;
+            choiceIndex < 5;
+            choiceIndex++
+          ) {
+
+            score +=
+              ringScore(
+                refinedX[
+                  columnIndex
+                ][
+                  choiceIndex
+                ],
+                testY
               )
+          }
+
+          if (
+            score >
+            bestRowScore
+          ) {
+
+            bestRowScore =
+              score
+
+            bestY =
+              testY
+          }
+        }
+
+        // ===============================================
+        // BACA 5 PILIHAN
+        // ===============================================
+
+        const inkValues = []
+
+        for (
+          let choiceIndex = 0;
+          choiceIndex < 5;
+          choiceIndex++
+        ) {
+
+          const x =
+            refinedX[
+              columnIndex
+            ][
+              choiceIndex
+            ]
+
+          const ink =
+            calculateInk(
+              x,
+              bestY
+            )
+
+          inkValues.push(
+            ink
           )
+        }
 
-        const scores =
-          measurements.map(
-            (item) =>
-              item.score
-          )
+        // ===============================================
+        // CARI NILAI TERBESAR
+        // ===============================================
 
-        // -----------------------------------------------
-        // URUTKAN SCORE
-        // -----------------------------------------------
+        let highestIndex = 0
 
-        const sorted =
-          [...scores].sort(
+        for (
+          let i = 1;
+          i <
+            inkValues.length;
+          i++
+        ) {
+
+          if (
+            inkValues[i] >
+            inkValues[
+              highestIndex
+            ]
+          ) {
+
+            highestIndex =
+              i
+          }
+        }
+
+        const highest =
+          inkValues[
+            highestIndex
+          ]
+
+        const sortedInk =
+          [
+            ...inkValues
+          ].sort(
             (a, b) =>
               b - a
           )
 
-        const highest =
-          sorted[0] || 0
-
         const second =
-          sorted[1] || 0
+          sortedInk[1] || 0
 
-        const highestIndex =
-          scores.indexOf(
-            highest
-          )
-
-        // -----------------------------------------------
-        // DEBUG
-        // -----------------------------------------------
-
-        inkDebug.push(
-          `${questionNumber}:` +
-          measurements
-            .map(
-              (item) =>
-                item.score
-                  .toFixed(2)
-            )
-            .join("/")
-        )
-
-        // =================================================
-        // TENTUKAN KOSONG
+        // ===============================================
+        // CEK APAKAH POSISI BARIS BENAR-BENAR ADA
         //
-        // Nilai harus cukup tinggi.
-        // =================================================
+        // Ring score harus cukup kuat.
+        // ===============================================
 
-        const EMPTY_THRESHOLD =
-          0.15
+        const rowExists =
+          bestRowScore >
+          0.18
 
-        // =================================================
-        // TENTUKAN DOUBLE
-        //
-        // Dua bubble harus sama-sama
-        // benar-benar gelap.
-        // =================================================
-
-        const isDouble =
-          highest >= 0.22 &&
-          second >= 0.16 &&
-          second >=
-            highest * 0.72
+        // ===============================================
+        // TENTUKAN JAWABAN
+        // ===============================================
 
         if (
+          !rowExists
+        ) {
+
+          answers[
+            questionNumber
+          ] = ""
+
+        } else if (
           highest <
           EMPTY_THRESHOLD
         ) {
@@ -1275,9 +1293,13 @@ const readStudentAnswers = (
           ] = ""
 
         } else if (
-          isDouble
+          highest >=
+            STRONG_THRESHOLD &&
+          second >=
+            highest * 0.72
         ) {
 
+          // dua jawaban sama-sama hitam
           answers[
             questionNumber
           ] = ""
@@ -1296,6 +1318,22 @@ const readStudentAnswers = (
           answeredCount++
         }
 
+        // ===============================================
+        // DEBUG
+        // ===============================================
+
+        console.log(
+          `SOAL ${questionNumber}`,
+          inkValues.map(
+            (v) =>
+              Number(
+                v.toFixed(3)
+              )
+          ),
+          "Y:",
+          Math.round(bestY)
+        )
+
         questionNumber++
       }
     }
@@ -1304,125 +1342,37 @@ const readStudentAnswers = (
     // DEBUG
     // =====================================================
 
-    const columnDebug =
-      rowsPerColumn.join("/")
-
-    const debug =
-      `🔲 Grid LJK Tetap` +
-      ` | Kolom: ${columnCount}` +
-      ` | Baris: ${columnDebug}` +
-      ` | Terbaca: ${answeredCount}/${totalQuestions}` +
-      ` | Ganda: ${doubleCount}`
-
-    console.log(
-      "===================================="
-    )
-
-    console.log(
-      "GRID LJK TETAP"
-    )
-
-    console.log(
-      "Ukuran:",
-      width,
-      "x",
-      height
-    )
-
-    console.log(
-      "Jumlah soal:",
-      totalQuestions
-    )
-
-    console.log(
-      "Kolom:",
-      columnCount
-    )
-
-    console.log(
-      "Baris:",
-      rowsPerColumn
-    )
-
-    console.log(
-      "Section line Y:",
-      Math.round(
-        sectionLineY
-      )
-    )
-
-    console.log(
-      "First row Y:",
-      Math.round(
-        firstRowCenterY
-      )
-    )
-
-    console.log(
-      "X bubble:",
-      Array.from(
-        {
-          length:
-            columnCount,
-        },
-        (_, index) =>
-          getBubbleXPositions(
-            index
-          ).map(
-            (x) =>
-              Math.round(x)
-          )
-      )
-    )
-
-    console.log(
-      "Jawaban:",
-      answers
-    )
-
-    console.log(
-      "Tinta:",
-      inkDebug
-    )
-
-    console.log(
-      "===================================="
-    )
-
     return {
       answers,
-      debug,
+
+      debug:
+        `Grid ${totalQuestions} soal | ` +
+        `Kolom: ${columnCount} | ` +
+        `Baris: ${rowsPerColumn.join("/")} | ` +
+        `Terbaca: ${answeredCount}/${totalQuestions} | ` +
+        `Ganda: ${doubleCount}`
     }
 
   } catch (error) {
 
     console.error(
-      "ERROR GRID LJK TETAP:",
+      "ERROR READ ANSWERS:",
       error
     )
 
     return {
       answers: {},
+
       debug:
-        `❌ Gagal membaca LJK: ${
-          error?.message ||
-          "error tidak diketahui"
-        }`,
+        "❌ Gagal membaca jawaban: " +
+        error.message
     }
 
   } finally {
 
-    if (src) {
-      src.delete()
-    }
-
-    if (gray) {
-      gray.delete()
-    }
-
-    if (blurred) {
-      blurred.delete()
-    }
+    if (src) src.delete()
+    if (gray) gray.delete()
+    if (blurred) blurred.delete()
   }
 }
 
@@ -1615,7 +1565,7 @@ const readStudentAnswers = (
 
       // Tampilkan debug di HP
       setMessage(
-        scanResult.debug
+        scanResult?.debug || "Gagal Membaca Lembar Jawaban"
       )
 
       // Hitung hasil
