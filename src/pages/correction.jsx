@@ -264,13 +264,24 @@ const detectAnswerSheet = (canvas) => {
 
   let src = null
   let gray = null
-  let binary = null
+  let blurred = null
+  let edges = null
+  let dilated = null
   let contours = null
   let hierarchy = null
+  let kernel = null
+  let bestContour = null
 
   try {
     src = cv.imread(canvas)
 
+    const imageWidth = src.cols
+    const imageHeight = src.rows
+    const imageArea = imageWidth * imageHeight
+
+    // =========================
+    // 1. GRAYSCALE
+    // =========================
     gray = new cv.Mat()
 
     cv.cvtColor(
@@ -279,43 +290,67 @@ const detectAnswerSheet = (canvas) => {
       cv.COLOR_RGBA2GRAY
     )
 
-    // ==========================================
-    // 1. PERBESAR KONTRAS MARKER HITAM
-    // ==========================================
+    // =========================
+    // 2. BLUR
+    // =========================
+    blurred = new cv.Mat()
 
-    binary = new cv.Mat()
-
-    cv.threshold(
+    cv.GaussianBlur(
       gray,
-      binary,
-      0,
-      255,
-      cv.THRESH_BINARY_INV + cv.THRESH_OTSU
+      blurred,
+      new cv.Size(5, 5),
+      0
     )
 
-    // ==========================================
-    // 2. CARI SEMUA CONTOUR
-    // ==========================================
+    // =========================
+    // 3. EDGE
+    // =========================
+    edges = new cv.Mat()
 
+    cv.Canny(
+      blurred,
+      edges,
+      40,
+      120
+    )
+
+    // =========================
+    // 4. SAMBUNG EDGE
+    // =========================
+    kernel = cv.getStructuringElement(
+      cv.MORPH_RECT,
+      new cv.Size(5, 5)
+    )
+
+    dilated = new cv.Mat()
+
+    cv.dilate(
+      edges,
+      dilated,
+      kernel,
+      new cv.Point(-1, -1),
+      2
+    )
+
+    // =========================
+    // 5. CARI CONTOUR
+    // =========================
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
 
     cv.findContours(
-      binary,
+      dilated,
       contours,
       hierarchy,
       cv.RETR_EXTERNAL,
       cv.CHAIN_APPROX_SIMPLE
     )
 
-    const imageArea =
-      canvas.width * canvas.height
-
-    const candidates = []
-
-    // ==========================================
-    // 3. CARI OBJEK YANG MIRIP MARKER
-    // ==========================================
+    // =========================
+    // 6. CARI BENTUK 4 SUDUT
+    // =========================
+    let bestArea = 0
+    let bestApprox = null
 
     for (
       let i = 0;
@@ -324,343 +359,211 @@ const detectAnswerSheet = (canvas) => {
     ) {
       const contour = contours.get(i)
 
-      try {
-        const area =
-          cv.contourArea(contour)
+      const area = cv.contourArea(contour)
 
-        // Jangan ambil objek terlalu kecil
-        if (
-          area < imageArea * 0.00008
-        ) {
-          continue
-        }
-
-        // Jangan ambil objek terlalu besar
-        if (
-          area > imageArea * 0.03
-        ) {
-          continue
-        }
-
-        const perimeter =
-          cv.arcLength(
-            contour,
-            true
-          )
-
-        if (perimeter <= 0) {
-          continue
-        }
-
-        const approx =
-          new cv.Mat()
-
-        cv.approxPolyDP(
-          contour,
-          approx,
-          0.04 * perimeter,
-          true
-        )
-
-        // Marker harus kira-kira kotak
-        if (
-          approx.rows >= 4 &&
-          approx.rows <= 8
-        ) {
-          const rect =
-            cv.boundingRect(
-              contour
-            )
-
-          const w = rect.width
-          const h = rect.height
-
-          if (
-            w > 0 &&
-            h > 0
-          ) {
-            const ratio =
-              w / h
-
-            // Marker harus mendekati persegi
-            if (
-              ratio >= 0.55 &&
-              ratio <= 1.8
-            ) {
-              const centerX =
-                rect.x +
-                rect.width / 2
-
-              const centerY =
-                rect.y +
-                rect.height / 2
-
-              candidates.push({
-                x: centerX,
-                y: centerY,
-                width: w,
-                height: h,
-                area
-              })
-            }
-          }
-        }
-
-        approx.delete()
-
-      } finally {
+      // Abaikan objek kecil
+      if (
+        area < imageArea * 0.20 ||
+        area > imageArea * 0.98
+      ) {
         contour.delete()
+        continue
       }
+
+      const perimeter =
+        cv.arcLength(contour, true)
+
+      const approx = new cv.Mat()
+
+      cv.approxPolyDP(
+        contour,
+        approx,
+        0.02 * perimeter,
+        true
+      )
+
+      // Kita cari bentuk 4 sudut
+      if (
+        approx.rows === 4 &&
+        area > bestArea
+      ) {
+        if (bestApprox) {
+          bestApprox.delete()
+        }
+
+        bestApprox = approx
+        bestArea = area
+      } else {
+        approx.delete()
+      }
+
+      contour.delete()
     }
 
-    console.log(
-      "Kandidat marker:",
-      candidates
-    )
-
-    // ==========================================
-    // 4. BUANG KANDIDAT YANG TERLALU DEKAT
-    // ==========================================
-
-    const filtered = []
-
-    candidates
-      .sort(
-        (a, b) =>
-          b.area - a.area
-      )
-      .forEach((candidate) => {
-
-        const duplicate =
-          filtered.some((existing) => {
-
-            const dx =
-              candidate.x -
-              existing.x
-
-            const dy =
-              candidate.y -
-              existing.y
-
-            const distance =
-              Math.sqrt(
-                dx * dx +
-                dy * dy
-              )
-
-            return (
-              distance <
-              Math.min(
-                candidate.width,
-                candidate.height
-              ) * 1.5
-            )
-          })
-
-        if (!duplicate) {
-          filtered.push(candidate)
-        }
-      })
-
-    // ==========================================
-    // 5. CARI 4 MARKER PALING MASUK AKAL
-    // ==========================================
-
-    if (filtered.length < 4) {
+    if (!bestApprox) {
       return {
         detected: false,
         message:
-          `❌ Marker belum lengkap. Ditemukan ${filtered.length}/4.`
+          "LJK belum terdeteksi. Pastikan seluruh kertas terlihat."
       }
     }
 
-    // ==========================================
-    // 6. URUTKAN BERDASARKAN POSISI
-    // ==========================================
+    // =========================
+    // 7. AMBIL 4 TITIK
+    // =========================
+    const points = []
 
-    const points = [...filtered]
+    for (
+      let i = 0;
+      i < 4;
+      i++
+    ) {
+      const point =
+        bestApprox.data32S
 
-    // Kandidat paling kiri atas
+      // approx CV_32S
+      const x =
+        point[i * 2]
+
+      const y =
+        point[i * 2 + 1]
+
+      points.push({
+        x,
+        y
+      })
+    }
+
+    // =========================
+    // 8. URUTKAN SUDUT
+    // =========================
+    // Metode ini lebih tahan terhadap
+    // LJK miring/perspektif.
+
     const topLeft =
       points.reduce(
-        (best, p) => {
-          if (!best) return p
-
-          return (
-            p.x + p.y <
-            best.x + best.y
-          )
+        (best, p) =>
+          p.x + p.y <
+          best.x + best.y
             ? p
             : best
-        },
-        null
       )
 
-    // Kandidat paling kanan bawah
     const bottomRight =
       points.reduce(
-        (best, p) => {
-          if (!best) return p
-
-          return (
-            p.x + p.y >
-            best.x + best.y
-          )
+        (best, p) =>
+          p.x + p.y >
+          best.x + best.y
             ? p
             : best
-        },
-        null
       )
 
-    // Kandidat paling kanan atas
     const topRight =
       points.reduce(
-        (best, p) => {
-          if (!best) return p
-
-          return (
-            p.x - p.y >
-            best.x - best.y
-          )
+        (best, p) =>
+          p.x - p.y >
+          best.x - best.y
             ? p
             : best
-        },
-        null
       )
 
-    // Kandidat paling kiri bawah
     const bottomLeft =
       points.reduce(
-        (best, p) => {
-          if (!best) return p
-
-          return (
-            p.x - p.y <
-            best.x - best.y
-          )
+        (best, p) =>
+          p.x - p.y <
+          best.x - best.y
             ? p
             : best
-        },
-        null
       )
 
-    // ==========================================
-    // 7. PASTIKAN 4 TITIK BERBEDA
-    // ==========================================
+    // =========================
+    // 9. VALIDASI
+    // =========================
+    const widthTop = Math.hypot(
+      topRight.x - topLeft.x,
+      topRight.y - topLeft.y
+    )
 
-    const markersArray = [
-      topLeft,
-      topRight,
-      bottomLeft,
-      bottomRight
-    ]
+    const widthBottom = Math.hypot(
+      bottomRight.x - bottomLeft.x,
+      bottomRight.y - bottomLeft.y
+    )
 
-    const uniqueMarkers = []
+    const heightLeft = Math.hypot(
+      bottomLeft.x - topLeft.x,
+      bottomLeft.y - topLeft.y
+    )
 
-    markersArray.forEach((marker) => {
+    const heightRight = Math.hypot(
+      bottomRight.x - topRight.x,
+      bottomRight.y - topRight.y
+    )
 
-      if (!marker) return
+    const averageWidth =
+      (widthTop + widthBottom) / 2
 
-      const alreadyExists =
-        uniqueMarkers.some((existing) => {
+    const averageHeight =
+      (heightLeft + heightRight) / 2
 
-          const dx =
-            marker.x -
-            existing.x
+    const ratio =
+      averageWidth / averageHeight
 
-          const dy =
-            marker.y -
-            existing.y
-
-          return (
-            Math.sqrt(
-              dx * dx +
-              dy * dy
-            ) < 20
-          )
-        })
-
-      if (!alreadyExists) {
-        uniqueMarkers.push(marker)
-      }
-    })
-
+    // F4 portrait sekitar 0.636
+    // beri toleransi cukup lebar
     if (
-      uniqueMarkers.length !== 4
+      ratio < 0.45 ||
+      ratio > 0.85
     ) {
+      bestApprox.delete()
+
       return {
         detected: false,
         message:
-          "❌ Posisi 4 marker belum dapat ditentukan."
+          "Bentuk LJK kurang jelas. Coba pastikan seluruh kertas masuk kamera."
       }
     }
 
-    // ==========================================
-    // 8. VALIDASI BENTUK LJK
-    // ==========================================
-
-    const widthTop =
-      Math.hypot(
-        topRight.x - topLeft.x,
-        topRight.y - topLeft.y
-      )
-
-    const widthBottom =
-      Math.hypot(
-        bottomRight.x - bottomLeft.x,
-        bottomRight.y - bottomLeft.y
-      )
-
-    const heightLeft =
-      Math.hypot(
-        bottomLeft.x - topLeft.x,
-        bottomLeft.y - topLeft.y
-      )
-
-    const heightRight =
-      Math.hypot(
-        bottomRight.x - topRight.x,
-        bottomRight.y - topRight.y
-      )
-
-    const averageWidth =
-      (
-        widthTop +
-        widthBottom
-      ) / 2
-
-    const averageHeight =
-      (
-        heightLeft +
-        heightRight
-      ) / 2
-
-    const ratio =
-      averageWidth /
-      averageHeight
+    const markers = {
+      topLeft: {
+        x: topLeft.x,
+        y: topLeft.y
+      },
+      topRight: {
+        x: topRight.x,
+        y: topRight.y
+      },
+      bottomLeft: {
+        x: bottomLeft.x,
+        y: bottomLeft.y
+      },
+      bottomRight: {
+        x: bottomRight.x,
+        y: bottomRight.y
+      }
+    }
 
     console.log(
-      "===== MARKER TERDETEKSI ====="
+      "===== SUDUT LJK ====="
     )
 
     console.log(
       "TL:",
-      topLeft
+      markers.topLeft
     )
 
     console.log(
       "TR:",
-      topRight
+      markers.topRight
     )
 
     console.log(
       "BL:",
-      bottomLeft
+      markers.bottomLeft
     )
 
     console.log(
       "BR:",
-      bottomRight
+      markers.bottomRight
     )
 
     console.log(
@@ -668,80 +571,56 @@ const detectAnswerSheet = (canvas) => {
       ratio
     )
 
-    // F4 portrait sekitar 0.636
-    if (
-      ratio < 0.35 ||
-      ratio > 1.0
-    ) {
-      return {
-        detected: false,
-        message:
-          "❌ Bentuk LJK tidak meyakinkan. Pastikan seluruh kertas terlihat."
-      }
-    }
+    console.log(
+      "TOP WIDTH:",
+      widthTop
+    )
 
-    // ==========================================
-    // 9. RETURN MARKER
-    // ==========================================
+    console.log(
+      "BOTTOM WIDTH:",
+      widthBottom
+    )
+
+    console.log(
+      "LEFT HEIGHT:",
+      heightLeft
+    )
+
+    console.log(
+      "RIGHT HEIGHT:",
+      heightRight
+    )
+
+    bestApprox.delete()
 
     return {
       detected: true,
-
       message:
-        "✅ 4 marker LJK berhasil ditemukan!",
-
-      markers: {
-        topLeft: {
-          x: topLeft.x,
-          y: topLeft.y
-        },
-
-        topRight: {
-          x: topRight.x,
-          y: topRight.y
-        },
-
-        bottomLeft: {
-          x: bottomLeft.x,
-          y: bottomLeft.y
-        },
-
-        bottomRight: {
-          x: bottomRight.x,
-          y: bottomRight.y
-        }
-      }
+        "Lembar jawaban berhasil terdeteksi! ✅",
+      markers
     }
 
   } catch (error) {
-
     console.error(
-      "ERROR DETEKSI MARKER:",
+      "ERROR DETEKSI LJK:",
       error
     )
 
     return {
       detected: false,
       message:
-        "❌ Gagal mendeteksi marker LJK."
+        "Gagal mendeteksi lembar jawaban."
     }
 
   } finally {
-
-    if (src)
-      src.delete()
-
-    if (gray)
-      gray.delete()
-
-    if (binary)
-      binary.delete()
-
-    if (contours)
-      contours.delete()
-
-    if (hierarchy)
-      hierarchy.delete()
+    if (src) src.delete()
+    if (gray) gray.delete()
+    if (blurred) blurred.delete()
+    if (edges) edges.delete()
+    if (dilated) dilated.delete()
+    if (contours) contours.delete()
+    if (hierarchy) hierarchy.delete()
+    if (kernel) kernel.delete()
   }
 }
   // =========================
