@@ -264,7 +264,7 @@ const detectAnswerSheet = (canvas) => {
 
   let src = null
   let gray = null
-  let threshold = null
+  let binary = null
   let contours = null
   let hierarchy = null
 
@@ -280,28 +280,28 @@ const detectAnswerSheet = (canvas) => {
     )
 
     // ==========================================
-    // 1. THRESHOLD HITAM
+    // 1. PERBESAR KONTRAS MARKER HITAM
     // ==========================================
 
-    threshold = new cv.Mat()
+    binary = new cv.Mat()
 
     cv.threshold(
       gray,
-      threshold,
-      100,
+      binary,
+      0,
       255,
-      cv.THRESH_BINARY_INV
+      cv.THRESH_BINARY_INV + cv.THRESH_OTSU
     )
 
     // ==========================================
-    // 2. CARI CONTOUR
+    // 2. CARI SEMUA CONTOUR
     // ==========================================
 
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
 
     cv.findContours(
-      threshold,
+      binary,
       contours,
       hierarchy,
       cv.RETR_EXTERNAL,
@@ -314,7 +314,7 @@ const detectAnswerSheet = (canvas) => {
     const candidates = []
 
     // ==========================================
-    // 3. CARI BENTUK KOTAK HITAM
+    // 3. CARI OBJEK YANG MIRIP MARKER
     // ==========================================
 
     for (
@@ -322,432 +322,395 @@ const detectAnswerSheet = (canvas) => {
       i < contours.size();
       i++
     ) {
-      const contour =
-        contours.get(i)
+      const contour = contours.get(i)
 
-      const area =
-        cv.contourArea(contour)
+      try {
+        const area =
+          cv.contourArea(contour)
 
-      // Marker harus cukup besar,
-      // tapi jangan terlalu besar.
-      if (
-        area < imageArea * 0.00015 ||
-        area > imageArea * 0.02
-      ) {
-        contour.delete()
-        continue
-      }
+        // Jangan ambil objek terlalu kecil
+        if (
+          area < imageArea * 0.00008
+        ) {
+          continue
+        }
 
-      const perimeter =
-        cv.arcLength(
+        // Jangan ambil objek terlalu besar
+        if (
+          area > imageArea * 0.03
+        ) {
+          continue
+        }
+
+        const perimeter =
+          cv.arcLength(
+            contour,
+            true
+          )
+
+        if (perimeter <= 0) {
+          continue
+        }
+
+        const approx =
+          new cv.Mat()
+
+        cv.approxPolyDP(
           contour,
+          approx,
+          0.04 * perimeter,
           true
         )
 
-      if (perimeter <= 0) {
-        contour.delete()
-        continue
-      }
-
-      const approx =
-        new cv.Mat()
-
-      cv.approxPolyDP(
-        contour,
-        approx,
-        0.04 * perimeter,
-        true
-      )
-
-      // Marker LJK berupa kotak
-      if (
-        approx.rows === 4
-      ) {
-
-        const rect =
-          cv.boundingRect(
-            contour
-          )
-
-        const w = rect.width
-        const h = rect.height
-
-        const ratio =
-          Math.min(w, h) /
-          Math.max(w, h)
-
-        // Harus mendekati persegi
+        // Marker harus kira-kira kotak
         if (
-          ratio >= 0.65
+          approx.rows >= 4 &&
+          approx.rows <= 8
         ) {
+          const rect =
+            cv.boundingRect(
+              contour
+            )
 
-          const centerX =
-            rect.x +
-            rect.width / 2
+          const w = rect.width
+          const h = rect.height
 
-          const centerY =
-            rect.y +
-            rect.height / 2
-
-          candidates.push({
-            x: centerX,
-            y: centerY,
-            width: w,
-            height: h,
-            area
-          })
-        }
-      }
-
-      approx.delete()
-      contour.delete()
-    }
-
-    // ==========================================
-    // 4. HARUS ADA MINIMAL 4 KANDIDAT
-    // ==========================================
-
-    if (
-      candidates.length < 4
-    ) {
-
-      return {
-        detected: false,
-        message:
-          `❌ Marker belum lengkap. ` +
-          `Ditemukan ${candidates.length}/4 marker.`
-      }
-    }
-
-    // ==========================================
-    // 5. CARI 4 MARKER YANG UKURANNYA MIRIP
-    // ==========================================
-
-    candidates.sort(
-      (a, b) =>
-        b.area - a.area
-    )
-
-    let bestGroup = null
-    let bestScore = Infinity
-
-    // Coba kombinasi kandidat
-    for (
-      let a = 0;
-      a < candidates.length;
-      a++
-    ) {
-      for (
-        let b = a + 1;
-        b < candidates.length;
-        b++
-      ) {
-        for (
-          let c = b + 1;
-          c < candidates.length;
-          c++
-        ) {
-          for (
-            let d = c + 1;
-            d < candidates.length;
-            d++
+          if (
+            w > 0 &&
+            h > 0
           ) {
+            const ratio =
+              w / h
 
-            const group = [
-              candidates[a],
-              candidates[b],
-              candidates[c],
-              candidates[d]
-            ]
-
-            // ==================================
-            // UKURAN MARKER HARUS MIRIP
-            // ==================================
-
-            const sizes =
-              group.map(
-                p =>
-                  (p.width +
-                    p.height) /
-                  2
-              )
-
-            const averageSize =
-              sizes.reduce(
-                (sum, value) =>
-                  sum + value,
-                0
-              ) /
-              sizes.length
-
-            const sizeDifference =
-              Math.max(
-                ...sizes
-              ) -
-              Math.min(
-                ...sizes
-              )
-
+            // Marker harus mendekati persegi
             if (
-              sizeDifference >
-              averageSize * 0.5
+              ratio >= 0.55 &&
+              ratio <= 1.8
             ) {
-              continue
-            }
+              const centerX =
+                rect.x +
+                rect.width / 2
 
-            // ==================================
-            // URUTKAN BERDASARKAN POSISI
-            // ==================================
+              const centerY =
+                rect.y +
+                rect.height / 2
 
-            const sorted =
-              [...group].sort(
-                (p1, p2) =>
-                  p1.x + p1.y -
-                  (p2.x + p2.y)
-              )
-
-            const topLeft =
-              sorted[0]
-
-            const bottomRight =
-              sorted[3]
-
-            const remaining =
-              sorted.slice(1, 3)
-
-            let topRight =
-              remaining[0]
-
-            let bottomLeft =
-              remaining[1]
-
-            if (
-              topRight.y >
-              bottomLeft.y
-            ) {
-              const temp =
-                topRight
-
-              topRight =
-                bottomLeft
-
-              bottomLeft =
-                temp
-            }
-
-            // ==================================
-            // CEK BENTUK PERSEGI PANJANG
-            // ==================================
-
-            const topWidth =
-              Math.hypot(
-                topRight.x -
-                  topLeft.x,
-                topRight.y -
-                  topLeft.y
-              )
-
-            const bottomWidth =
-              Math.hypot(
-                bottomRight.x -
-                  bottomLeft.x,
-                bottomRight.y -
-                  bottomLeft.y
-              )
-
-            const leftHeight =
-              Math.hypot(
-                bottomLeft.x -
-                  topLeft.x,
-                bottomLeft.y -
-                  topLeft.y
-              )
-
-            const rightHeight =
-              Math.hypot(
-                bottomRight.x -
-                  topRight.x,
-                bottomRight.y -
-                  topRight.y
-              )
-
-            if (
-              topWidth <= 0 ||
-              bottomWidth <= 0 ||
-              leftHeight <= 0 ||
-              rightHeight <= 0
-            ) {
-              continue
-            }
-
-            // ==================================
-            // PERBANDINGAN SISI
-            // ==================================
-
-            const widthRatio =
-              Math.min(
-                topWidth,
-                bottomWidth
-              ) /
-              Math.max(
-                topWidth,
-                bottomWidth
-              )
-
-            const heightRatio =
-              Math.min(
-                leftHeight,
-                rightHeight
-              ) /
-              Math.max(
-                leftHeight,
-                rightHeight
-              )
-
-            if (
-              widthRatio < 0.45 ||
-              heightRatio < 0.45
-            ) {
-              continue
-            }
-
-            // ==================================
-            // UKURAN KESEIMBANGAN
-            // ==================================
-
-            const centerX =
-              (
-                topLeft.x +
-                topRight.x +
-                bottomLeft.x +
-                bottomRight.x
-              ) / 4
-
-            const centerY =
-              (
-                topLeft.y +
-                topRight.y +
-                bottomLeft.y +
-                bottomRight.y
-              ) / 4
-
-            const distances =
-              group.map(
-                p =>
-                  Math.hypot(
-                    p.x - centerX,
-                    p.y - centerY
-                  )
-              )
-
-            const maxDistance =
-              Math.max(
-                ...distances
-              )
-
-            const minDistance =
-              Math.min(
-                ...distances
-              )
-
-            const shapeScore =
-              Math.abs(
-                maxDistance -
-                  minDistance
-              )
-
-            // Semakin kecil semakin bagus
-            const score =
-              shapeScore +
-              (1 - widthRatio) * 100 +
-              (1 - heightRatio) * 100
-
-            if (
-              score <
-              bestScore
-            ) {
-              bestScore =
-                score
-
-              bestGroup = {
-                topLeft,
-                topRight,
-                bottomLeft,
-                bottomRight
-              }
+              candidates.push({
+                x: centerX,
+                y: centerY,
+                width: w,
+                height: h,
+                area
+              })
             }
           }
         }
-      }
-    }
 
-    // ==========================================
-    // 6. GAGAL MENEMUKAN 4 MARKER
-    // ==========================================
+        approx.delete()
 
-    if (!bestGroup) {
-      return {
-        detected: false,
-        message:
-          "❌ 4 marker belum membentuk LJK yang valid."
-      }
-    }
-
-    // ==========================================
-    // 7. HASIL MARKER
-    // ==========================================
-
-    const markers = {
-      topLeft: {
-        x: bestGroup.topLeft.x,
-        y: bestGroup.topLeft.y
-      },
-
-      topRight: {
-        x: bestGroup.topRight.x,
-        y: bestGroup.topRight.y
-      },
-
-      bottomLeft: {
-        x: bestGroup.bottomLeft.x,
-        y: bestGroup.bottomLeft.y
-      },
-
-      bottomRight: {
-        x: bestGroup.bottomRight.x,
-        y: bestGroup.bottomRight.y
+      } finally {
+        contour.delete()
       }
     }
 
     console.log(
-      "===== 4 MARKER TERDETEKSI ====="
+      "Kandidat marker:",
+      candidates
+    )
+
+    // ==========================================
+    // 4. BUANG KANDIDAT YANG TERLALU DEKAT
+    // ==========================================
+
+    const filtered = []
+
+    candidates
+      .sort(
+        (a, b) =>
+          b.area - a.area
+      )
+      .forEach((candidate) => {
+
+        const duplicate =
+          filtered.some((existing) => {
+
+            const dx =
+              candidate.x -
+              existing.x
+
+            const dy =
+              candidate.y -
+              existing.y
+
+            const distance =
+              Math.sqrt(
+                dx * dx +
+                dy * dy
+              )
+
+            return (
+              distance <
+              Math.min(
+                candidate.width,
+                candidate.height
+              ) * 1.5
+            )
+          })
+
+        if (!duplicate) {
+          filtered.push(candidate)
+        }
+      })
+
+    // ==========================================
+    // 5. CARI 4 MARKER PALING MASUK AKAL
+    // ==========================================
+
+    if (filtered.length < 4) {
+      return {
+        detected: false,
+        message:
+          `❌ Marker belum lengkap. Ditemukan ${filtered.length}/4.`
+      }
+    }
+
+    // ==========================================
+    // 6. URUTKAN BERDASARKAN POSISI
+    // ==========================================
+
+    const points = [...filtered]
+
+    // Kandidat paling kiri atas
+    const topLeft =
+      points.reduce(
+        (best, p) => {
+          if (!best) return p
+
+          return (
+            p.x + p.y <
+            best.x + best.y
+          )
+            ? p
+            : best
+        },
+        null
+      )
+
+    // Kandidat paling kanan bawah
+    const bottomRight =
+      points.reduce(
+        (best, p) => {
+          if (!best) return p
+
+          return (
+            p.x + p.y >
+            best.x + best.y
+          )
+            ? p
+            : best
+        },
+        null
+      )
+
+    // Kandidat paling kanan atas
+    const topRight =
+      points.reduce(
+        (best, p) => {
+          if (!best) return p
+
+          return (
+            p.x - p.y >
+            best.x - best.y
+          )
+            ? p
+            : best
+        },
+        null
+      )
+
+    // Kandidat paling kiri bawah
+    const bottomLeft =
+      points.reduce(
+        (best, p) => {
+          if (!best) return p
+
+          return (
+            p.x - p.y <
+            best.x - best.y
+          )
+            ? p
+            : best
+        },
+        null
+      )
+
+    // ==========================================
+    // 7. PASTIKAN 4 TITIK BERBEDA
+    // ==========================================
+
+    const markersArray = [
+      topLeft,
+      topRight,
+      bottomLeft,
+      bottomRight
+    ]
+
+    const uniqueMarkers = []
+
+    markersArray.forEach((marker) => {
+
+      if (!marker) return
+
+      const alreadyExists =
+        uniqueMarkers.some((existing) => {
+
+          const dx =
+            marker.x -
+            existing.x
+
+          const dy =
+            marker.y -
+            existing.y
+
+          return (
+            Math.sqrt(
+              dx * dx +
+              dy * dy
+            ) < 20
+          )
+        })
+
+      if (!alreadyExists) {
+        uniqueMarkers.push(marker)
+      }
+    })
+
+    if (
+      uniqueMarkers.length !== 4
+    ) {
+      return {
+        detected: false,
+        message:
+          "❌ Posisi 4 marker belum dapat ditentukan."
+      }
+    }
+
+    // ==========================================
+    // 8. VALIDASI BENTUK LJK
+    // ==========================================
+
+    const widthTop =
+      Math.hypot(
+        topRight.x - topLeft.x,
+        topRight.y - topLeft.y
+      )
+
+    const widthBottom =
+      Math.hypot(
+        bottomRight.x - bottomLeft.x,
+        bottomRight.y - bottomLeft.y
+      )
+
+    const heightLeft =
+      Math.hypot(
+        bottomLeft.x - topLeft.x,
+        bottomLeft.y - topLeft.y
+      )
+
+    const heightRight =
+      Math.hypot(
+        bottomRight.x - topRight.x,
+        bottomRight.y - topRight.y
+      )
+
+    const averageWidth =
+      (
+        widthTop +
+        widthBottom
+      ) / 2
+
+    const averageHeight =
+      (
+        heightLeft +
+        heightRight
+      ) / 2
+
+    const ratio =
+      averageWidth /
+      averageHeight
+
+    console.log(
+      "===== MARKER TERDETEKSI ====="
     )
 
     console.log(
       "TL:",
-      markers.topLeft
+      topLeft
     )
 
     console.log(
       "TR:",
-      markers.topRight
+      topRight
     )
 
     console.log(
       "BL:",
-      markers.bottomLeft
+      bottomLeft
     )
 
     console.log(
       "BR:",
-      markers.bottomRight
+      bottomRight
     )
+
+    console.log(
+      "RATIO:",
+      ratio
+    )
+
+    // F4 portrait sekitar 0.636
+    if (
+      ratio < 0.35 ||
+      ratio > 1.0
+    ) {
+      return {
+        detected: false,
+        message:
+          "❌ Bentuk LJK tidak meyakinkan. Pastikan seluruh kertas terlihat."
+      }
+    }
+
+    // ==========================================
+    // 9. RETURN MARKER
+    // ==========================================
 
     return {
       detected: true,
+
       message:
-        "LJK berhasil ditemukan berdasarkan 4 marker! ✅",
-      markers
+        "✅ 4 marker LJK berhasil ditemukan!",
+
+      markers: {
+        topLeft: {
+          x: topLeft.x,
+          y: topLeft.y
+        },
+
+        topRight: {
+          x: topRight.x,
+          y: topRight.y
+        },
+
+        bottomLeft: {
+          x: bottomLeft.x,
+          y: bottomLeft.y
+        },
+
+        bottomRight: {
+          x: bottomRight.x,
+          y: bottomRight.y
+        }
+      }
     }
 
   } catch (error) {
@@ -771,8 +734,8 @@ const detectAnswerSheet = (canvas) => {
     if (gray)
       gray.delete()
 
-    if (threshold)
-      threshold.delete()
+    if (binary)
+      binary.delete()
 
     if (contours)
       contours.delete()
