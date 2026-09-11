@@ -264,24 +264,13 @@ const detectAnswerSheet = (canvas) => {
 
   let src = null
   let gray = null
-  let blurred = null
-  let edges = null
-  let dilated = null
+  let threshold = null
   let contours = null
   let hierarchy = null
-  let kernel = null
-  let bestContour = null
 
   try {
     src = cv.imread(canvas)
 
-    const imageWidth = src.cols
-    const imageHeight = src.rows
-    const imageArea = imageWidth * imageHeight
-
-    // =========================
-    // 1. GRAYSCALE
-    // =========================
     gray = new cv.Mat()
 
     cv.cvtColor(
@@ -290,260 +279,448 @@ const detectAnswerSheet = (canvas) => {
       cv.COLOR_RGBA2GRAY
     )
 
-    // =========================
-    // 2. BLUR
-    // =========================
-    blurred = new cv.Mat()
+    // ==========================================
+    // 1. THRESHOLD HITAM
+    // ==========================================
 
-    cv.GaussianBlur(
+    threshold = new cv.Mat()
+
+    cv.threshold(
       gray,
-      blurred,
-      new cv.Size(5, 5),
-      0
+      threshold,
+      100,
+      255,
+      cv.THRESH_BINARY_INV
     )
 
-    // =========================
-    // 3. EDGE
-    // =========================
-    edges = new cv.Mat()
+    // ==========================================
+    // 2. CARI CONTOUR
+    // ==========================================
 
-    cv.Canny(
-      blurred,
-      edges,
-      40,
-      120
-    )
-
-    // =========================
-    // 4. SAMBUNG EDGE
-    // =========================
-    kernel = cv.getStructuringElement(
-      cv.MORPH_RECT,
-      new cv.Size(5, 5)
-    )
-
-    dilated = new cv.Mat()
-
-    cv.dilate(
-      edges,
-      dilated,
-      kernel,
-      new cv.Point(-1, -1),
-      2
-    )
-
-    // =========================
-    // 5. CARI CONTOUR
-    // =========================
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
 
     cv.findContours(
-      dilated,
+      threshold,
       contours,
       hierarchy,
       cv.RETR_EXTERNAL,
       cv.CHAIN_APPROX_SIMPLE
     )
 
-    // =========================
-    // 6. CARI BENTUK 4 SUDUT
-    // =========================
-    let bestArea = 0
-    let bestApprox = null
+    const imageArea =
+      canvas.width * canvas.height
+
+    const candidates = []
+
+    // ==========================================
+    // 3. CARI BENTUK KOTAK HITAM
+    // ==========================================
 
     for (
       let i = 0;
       i < contours.size();
       i++
     ) {
-      const contour = contours.get(i)
+      const contour =
+        contours.get(i)
 
-      const area = cv.contourArea(contour)
+      const area =
+        cv.contourArea(contour)
 
-      // Abaikan objek kecil
+      // Marker harus cukup besar,
+      // tapi jangan terlalu besar.
       if (
-        area < imageArea * 0.20 ||
-        area > imageArea * 0.98
+        area < imageArea * 0.00015 ||
+        area > imageArea * 0.02
       ) {
         contour.delete()
         continue
       }
 
       const perimeter =
-        cv.arcLength(contour, true)
+        cv.arcLength(
+          contour,
+          true
+        )
 
-      const approx = new cv.Mat()
+      if (perimeter <= 0) {
+        contour.delete()
+        continue
+      }
+
+      const approx =
+        new cv.Mat()
 
       cv.approxPolyDP(
         contour,
         approx,
-        0.02 * perimeter,
+        0.04 * perimeter,
         true
       )
 
-      // Kita cari bentuk 4 sudut
+      // Marker LJK berupa kotak
       if (
-        approx.rows === 4 &&
-        area > bestArea
+        approx.rows === 4
       ) {
-        if (bestApprox) {
-          bestApprox.delete()
-        }
 
-        bestApprox = approx
-        bestArea = area
-      } else {
-        approx.delete()
+        const rect =
+          cv.boundingRect(
+            contour
+          )
+
+        const w = rect.width
+        const h = rect.height
+
+        const ratio =
+          Math.min(w, h) /
+          Math.max(w, h)
+
+        // Harus mendekati persegi
+        if (
+          ratio >= 0.65
+        ) {
+
+          const centerX =
+            rect.x +
+            rect.width / 2
+
+          const centerY =
+            rect.y +
+            rect.height / 2
+
+          candidates.push({
+            x: centerX,
+            y: centerY,
+            width: w,
+            height: h,
+            area
+          })
+        }
       }
 
+      approx.delete()
       contour.delete()
     }
 
-    if (!bestApprox) {
-      return {
-        detected: false,
-        message:
-          "LJK belum terdeteksi. Pastikan seluruh kertas terlihat."
-      }
-    }
+    // ==========================================
+    // 4. HARUS ADA MINIMAL 4 KANDIDAT
+    // ==========================================
 
-    // =========================
-    // 7. AMBIL 4 TITIK
-    // =========================
-    const points = []
-
-    for (
-      let i = 0;
-      i < 4;
-      i++
-    ) {
-      const point =
-        bestApprox.data32S
-
-      // approx CV_32S
-      const x =
-        point[i * 2]
-
-      const y =
-        point[i * 2 + 1]
-
-      points.push({
-        x,
-        y
-      })
-    }
-
-    // =========================
-    // 8. URUTKAN SUDUT
-    // =========================
-    // Metode ini lebih tahan terhadap
-    // LJK miring/perspektif.
-
-    const topLeft =
-      points.reduce(
-        (best, p) =>
-          p.x + p.y <
-          best.x + best.y
-            ? p
-            : best
-      )
-
-    const bottomRight =
-      points.reduce(
-        (best, p) =>
-          p.x + p.y >
-          best.x + best.y
-            ? p
-            : best
-      )
-
-    const topRight =
-      points.reduce(
-        (best, p) =>
-          p.x - p.y >
-          best.x - best.y
-            ? p
-            : best
-      )
-
-    const bottomLeft =
-      points.reduce(
-        (best, p) =>
-          p.x - p.y <
-          best.x - best.y
-            ? p
-            : best
-      )
-
-    // =========================
-    // 9. VALIDASI
-    // =========================
-    const widthTop = Math.hypot(
-      topRight.x - topLeft.x,
-      topRight.y - topLeft.y
-    )
-
-    const widthBottom = Math.hypot(
-      bottomRight.x - bottomLeft.x,
-      bottomRight.y - bottomLeft.y
-    )
-
-    const heightLeft = Math.hypot(
-      bottomLeft.x - topLeft.x,
-      bottomLeft.y - topLeft.y
-    )
-
-    const heightRight = Math.hypot(
-      bottomRight.x - topRight.x,
-      bottomRight.y - topRight.y
-    )
-
-    const averageWidth =
-      (widthTop + widthBottom) / 2
-
-    const averageHeight =
-      (heightLeft + heightRight) / 2
-
-    const ratio =
-      averageWidth / averageHeight
-
-    // F4 portrait sekitar 0.636
-    // beri toleransi cukup lebar
     if (
-      ratio < 0.45 ||
-      ratio > 0.85
+      candidates.length < 4
     ) {
-      bestApprox.delete()
 
       return {
         detected: false,
         message:
-          "Bentuk LJK kurang jelas. Coba pastikan seluruh kertas masuk kamera."
+          `❌ Marker belum lengkap. ` +
+          `Ditemukan ${candidates.length}/4 marker.`
       }
     }
+
+    // ==========================================
+    // 5. CARI 4 MARKER YANG UKURANNYA MIRIP
+    // ==========================================
+
+    candidates.sort(
+      (a, b) =>
+        b.area - a.area
+    )
+
+    let bestGroup = null
+    let bestScore = Infinity
+
+    // Coba kombinasi kandidat
+    for (
+      let a = 0;
+      a < candidates.length;
+      a++
+    ) {
+      for (
+        let b = a + 1;
+        b < candidates.length;
+        b++
+      ) {
+        for (
+          let c = b + 1;
+          c < candidates.length;
+          c++
+        ) {
+          for (
+            let d = c + 1;
+            d < candidates.length;
+            d++
+          ) {
+
+            const group = [
+              candidates[a],
+              candidates[b],
+              candidates[c],
+              candidates[d]
+            ]
+
+            // ==================================
+            // UKURAN MARKER HARUS MIRIP
+            // ==================================
+
+            const sizes =
+              group.map(
+                p =>
+                  (p.width +
+                    p.height) /
+                  2
+              )
+
+            const averageSize =
+              sizes.reduce(
+                (sum, value) =>
+                  sum + value,
+                0
+              ) /
+              sizes.length
+
+            const sizeDifference =
+              Math.max(
+                ...sizes
+              ) -
+              Math.min(
+                ...sizes
+              )
+
+            if (
+              sizeDifference >
+              averageSize * 0.5
+            ) {
+              continue
+            }
+
+            // ==================================
+            // URUTKAN BERDASARKAN POSISI
+            // ==================================
+
+            const sorted =
+              [...group].sort(
+                (p1, p2) =>
+                  p1.x + p1.y -
+                  (p2.x + p2.y)
+              )
+
+            const topLeft =
+              sorted[0]
+
+            const bottomRight =
+              sorted[3]
+
+            const remaining =
+              sorted.slice(1, 3)
+
+            let topRight =
+              remaining[0]
+
+            let bottomLeft =
+              remaining[1]
+
+            if (
+              topRight.y >
+              bottomLeft.y
+            ) {
+              const temp =
+                topRight
+
+              topRight =
+                bottomLeft
+
+              bottomLeft =
+                temp
+            }
+
+            // ==================================
+            // CEK BENTUK PERSEGI PANJANG
+            // ==================================
+
+            const topWidth =
+              Math.hypot(
+                topRight.x -
+                  topLeft.x,
+                topRight.y -
+                  topLeft.y
+              )
+
+            const bottomWidth =
+              Math.hypot(
+                bottomRight.x -
+                  bottomLeft.x,
+                bottomRight.y -
+                  bottomLeft.y
+              )
+
+            const leftHeight =
+              Math.hypot(
+                bottomLeft.x -
+                  topLeft.x,
+                bottomLeft.y -
+                  topLeft.y
+              )
+
+            const rightHeight =
+              Math.hypot(
+                bottomRight.x -
+                  topRight.x,
+                bottomRight.y -
+                  topRight.y
+              )
+
+            if (
+              topWidth <= 0 ||
+              bottomWidth <= 0 ||
+              leftHeight <= 0 ||
+              rightHeight <= 0
+            ) {
+              continue
+            }
+
+            // ==================================
+            // PERBANDINGAN SISI
+            // ==================================
+
+            const widthRatio =
+              Math.min(
+                topWidth,
+                bottomWidth
+              ) /
+              Math.max(
+                topWidth,
+                bottomWidth
+              )
+
+            const heightRatio =
+              Math.min(
+                leftHeight,
+                rightHeight
+              ) /
+              Math.max(
+                leftHeight,
+                rightHeight
+              )
+
+            if (
+              widthRatio < 0.45 ||
+              heightRatio < 0.45
+            ) {
+              continue
+            }
+
+            // ==================================
+            // UKURAN KESEIMBANGAN
+            // ==================================
+
+            const centerX =
+              (
+                topLeft.x +
+                topRight.x +
+                bottomLeft.x +
+                bottomRight.x
+              ) / 4
+
+            const centerY =
+              (
+                topLeft.y +
+                topRight.y +
+                bottomLeft.y +
+                bottomRight.y
+              ) / 4
+
+            const distances =
+              group.map(
+                p =>
+                  Math.hypot(
+                    p.x - centerX,
+                    p.y - centerY
+                  )
+              )
+
+            const maxDistance =
+              Math.max(
+                ...distances
+              )
+
+            const minDistance =
+              Math.min(
+                ...distances
+              )
+
+            const shapeScore =
+              Math.abs(
+                maxDistance -
+                  minDistance
+              )
+
+            // Semakin kecil semakin bagus
+            const score =
+              shapeScore +
+              (1 - widthRatio) * 100 +
+              (1 - heightRatio) * 100
+
+            if (
+              score <
+              bestScore
+            ) {
+              bestScore =
+                score
+
+              bestGroup = {
+                topLeft,
+                topRight,
+                bottomLeft,
+                bottomRight
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ==========================================
+    // 6. GAGAL MENEMUKAN 4 MARKER
+    // ==========================================
+
+    if (!bestGroup) {
+      return {
+        detected: false,
+        message:
+          "❌ 4 marker belum membentuk LJK yang valid."
+      }
+    }
+
+    // ==========================================
+    // 7. HASIL MARKER
+    // ==========================================
 
     const markers = {
       topLeft: {
-        x: topLeft.x,
-        y: topLeft.y
+        x: bestGroup.topLeft.x,
+        y: bestGroup.topLeft.y
       },
+
       topRight: {
-        x: topRight.x,
-        y: topRight.y
+        x: bestGroup.topRight.x,
+        y: bestGroup.topRight.y
       },
+
       bottomLeft: {
-        x: bottomLeft.x,
-        y: bottomLeft.y
+        x: bestGroup.bottomLeft.x,
+        y: bestGroup.bottomLeft.y
       },
+
       bottomRight: {
-        x: bottomRight.x,
-        y: bottomRight.y
+        x: bestGroup.bottomRight.x,
+        y: bestGroup.bottomRight.y
       }
     }
 
     console.log(
-      "===== SUDUT LJK ====="
+      "===== 4 MARKER TERDETEKSI ====="
     )
 
     console.log(
@@ -566,61 +743,42 @@ const detectAnswerSheet = (canvas) => {
       markers.bottomRight
     )
 
-    console.log(
-      "RATIO:",
-      ratio
-    )
-
-    console.log(
-      "TOP WIDTH:",
-      widthTop
-    )
-
-    console.log(
-      "BOTTOM WIDTH:",
-      widthBottom
-    )
-
-    console.log(
-      "LEFT HEIGHT:",
-      heightLeft
-    )
-
-    console.log(
-      "RIGHT HEIGHT:",
-      heightRight
-    )
-
-    bestApprox.delete()
-
     return {
       detected: true,
       message:
-        "Lembar jawaban berhasil terdeteksi! ✅",
+        "LJK berhasil ditemukan berdasarkan 4 marker! ✅",
       markers
     }
 
   } catch (error) {
+
     console.error(
-      "ERROR DETEKSI LJK:",
+      "ERROR DETEKSI MARKER:",
       error
     )
 
     return {
       detected: false,
       message:
-        "Gagal mendeteksi lembar jawaban."
+        "❌ Gagal mendeteksi marker LJK."
     }
 
   } finally {
-    if (src) src.delete()
-    if (gray) gray.delete()
-    if (blurred) blurred.delete()
-    if (edges) edges.delete()
-    if (dilated) dilated.delete()
-    if (contours) contours.delete()
-    if (hierarchy) hierarchy.delete()
-    if (kernel) kernel.delete()
+
+    if (src)
+      src.delete()
+
+    if (gray)
+      gray.delete()
+
+    if (threshold)
+      threshold.delete()
+
+    if (contours)
+      contours.delete()
+
+    if (hierarchy)
+      hierarchy.delete()
   }
 }
   // =========================
