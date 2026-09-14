@@ -17,21 +17,17 @@ function createQuestion() {
   const [error, setError] = useState("")
 
   function handleTotalQuestionsChange(e) {
-    const total = Number(e.target.value)
+    const value = e.target.value
 
-    if (!e.target.value) {
+    // Kalau input dikosongkan
+    if (value === "") {
       setTotalQuestions("")
       setAnswers([])
       return
     }
 
-    if (total < 1) {
-      total = 1
-    } 
-
-    if (total > 100) {
-      total = 100
-    }
+    // Batasi antara 1 sampai 100
+    const total = Math.min(100, Math.max(1, Number(value)))
 
     setTotalQuestions(total)
 
