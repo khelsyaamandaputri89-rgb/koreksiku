@@ -19,7 +19,13 @@ function createQuestion() {
   function handleTotalQuestionsChange(e) {
     const total = Number(e.target.value)
 
-    if (total < 1) return
+    if (total < 1) {
+      total = 1
+    } 
+
+    if (total > 100) {
+      total = 100
+    }
 
     setTotalQuestions(total)
 
@@ -213,7 +219,7 @@ function createQuestion() {
               <input
                 type="number"
                 min="1"
-                max="200"
+                max="100"
                 value={totalQuestions}
                 onChange={handleTotalQuestionsChange}
                 required
