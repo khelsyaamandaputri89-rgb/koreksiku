@@ -19,6 +19,12 @@ function createQuestion() {
   function handleTotalQuestionsChange(e) {
     const total = Number(e.target.value)
 
+    if (!e.target.value) {
+      setTotalQuestions("")
+      setAnswers([])
+      return
+    }
+
     if (total < 1) {
       total = 1
     } 
