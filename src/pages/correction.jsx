@@ -1354,7 +1354,7 @@ const readStudentAnswers = (
           // =========================
           // 180 dibuat lebih sensitif
           // supaya pensil tipis tetap terbaca
-          if (value < 180) {
+          if (value < 200) {
             darkPixels++
           }
         }
