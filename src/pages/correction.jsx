@@ -262,50 +262,26 @@ function correction() {
 // =====================================================
 
 const detectAnswerSheet = (canvas) => {
-  if (!window.cv || !window.cv.Mat) {
-    return {
-      detected: false,
-      message: "OpenCV belum siap."
-    }
-  }
-
   const cv = window.cv
 
   let src = null
   let gray = null
   let blur = null
-  let threshold = null
   let edges = null
-  let dilated = null
   let contours = null
   let hierarchy = null
-  let kernel = null
 
   try {
     src = cv.imread(canvas)
 
-    const imageWidth = src.cols
-    const imageHeight = src.rows
-    const imageArea = imageWidth * imageHeight
-
-    // =================================================
-    // 1. GRAYSCALE
-    // =================================================
-
     gray = new cv.Mat()
-
     cv.cvtColor(
       src,
       gray,
       cv.COLOR_RGBA2GRAY
     )
 
-    // =================================================
-    // 2. BLUR
-    // =================================================
-
     blur = new cv.Mat()
-
     cv.GaussianBlur(
       gray,
       blur,
@@ -313,98 +289,62 @@ const detectAnswerSheet = (canvas) => {
       0
     )
 
-    // =================================================
-    // 3. THRESHOLD
-    //
-    // Membantu ketika cahaya tidak merata
-    // =================================================
-
-    threshold = new cv.Mat()
-
-    cv.adaptiveThreshold(
-      blur,
-      threshold,
-      255,
-      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-      cv.THRESH_BINARY,
-      31,
-      10
-    )
-
-    // =================================================
-    // 4. EDGE
-    // =================================================
-
     edges = new cv.Mat()
 
     cv.Canny(
       blur,
       edges,
-      30,
-      100
+      50,
+      150
     )
 
-    // =================================================
-    // 5. DILATE
-    //
-    // Sambungkan garis tepi kertas
-    // =================================================
-
-    kernel = cv.getStructuringElement(
-      cv.MORPH_RECT,
-      new cv.Size(5, 5)
+    // Perbesar sedikit garis tepi
+    const kernel = cv.Mat.ones(
+      3,
+      3,
+      cv.CV_8U
     )
-
-    dilated = new cv.Mat()
 
     cv.dilate(
       edges,
-      dilated,
-      kernel,
-      new cv.Point(-1, -1),
-      2
+      edges,
+      kernel
     )
 
-    // =================================================
-    // 6. CARI CONTOUR
-    // =================================================
+    kernel.delete()
 
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
 
     cv.findContours(
-      dilated,
+      edges,
       contours,
       hierarchy,
       cv.RETR_EXTERNAL,
       cv.CHAIN_APPROX_SIMPLE
     )
 
-    // =================================================
-    // 7. CARI KANDIDAT KERTAS
-    //
-    // Jangan terlalu ketat.
-    // LJK boleh lebih kecil / bergeser.
-    // =================================================
+    let bestContour = null
+    let bestArea = 0
 
-    let candidates = []
+    const imageArea =
+      canvas.width * canvas.height
 
     for (
       let i = 0;
       i < contours.size();
       i++
     ) {
-
       const contour =
         contours.get(i)
 
       const area =
         cv.contourArea(contour)
 
-      // LJK minimal sekitar 10% frame
+      // Kertas harus cukup besar
       if (
-        area < imageArea * 0.10 ||
-        area > imageArea * 0.97
+        area < imageArea * 0.20 ||
+        area > imageArea * 0.95
       ) {
         contour.delete()
         continue
@@ -422,144 +362,75 @@ const detectAnswerSheet = (canvas) => {
       cv.approxPolyDP(
         contour,
         approx,
-        0.035 * perimeter,
+        perimeter * 0.02,
         true
       )
 
-      // =================================================
-      // 8. CARI 4 SUDUT
-      // Toleransi diperbesar
-      // =================================================
-
+      // Cari kontur yang benar-benar
+      // memiliki 4 sudut
       if (
-        approx.rows === 4
+        approx.rows === 4 &&
+        area > bestArea
       ) {
-
-        const points = []
-
-        for (
-          let p = 0;
-          p < 4;
-          p++
-        ) {
-
-          points.push({
-            x: approx.data32S[p * 2],
-            y: approx.data32S[p * 2 + 1]
-          })
-
+        if (bestContour) {
+          bestContour.delete()
         }
 
-        // ===============================================
-        // HITUNG BOUNDING RECT
-        // ===============================================
+        bestContour =
+          approx.clone()
 
-        const xs =
-          points.map(
-            p => p.x
-          )
-
-        const ys =
-          points.map(
-            p => p.y
-          )
-
-        const minX =
-          Math.min(...xs)
-
-        const maxX =
-          Math.max(...xs)
-
-        const minY =
-          Math.min(...ys)
-
-        const maxY =
-          Math.max(...ys)
-
-        const boxWidth =
-          maxX - minX
-
-        const boxHeight =
-          maxY - minY
-
-        if (
-          boxWidth > 0 &&
-          boxHeight > 0
-        ) {
-
-          const ratio =
-            boxWidth /
-            boxHeight
-
-          // =============================================
-          // F4 portrait:
-          // sekitar 0.636
-          //
-          // Dibuat lebih longgar
-          // =============================================
-
-          if (
-            ratio >= 0.40 &&
-            ratio <= 0.95
-          ) {
-
-            candidates.push({
-              area,
-              points
-            })
-
-          }
-
-        }
-
+        bestArea = area
       }
 
       approx.delete()
       contour.delete()
     }
 
-    // =================================================
-    // 9. KALAU TIDAK ADA QUADRILATERAL
-    // =================================================
-
-    if (
-      candidates.length === 0
-    ) {
-
-      return {
-        detected: false,
-        message:
-          "❌ LJK belum terdeteksi. Pastikan seluruh kertas berada di dalam kotak scanner."
-      }
-
+    if (!bestContour) {
+      return null
     }
 
-    // =================================================
-    // 10. PILIH KERTAS TERBESAR
-    //
-    // Jadi posisi tidak harus di tengah.
-    // =================================================
+    // ==========================================
+    // AMBIL 4 SUDUT ASLI KERTAS
+    // ==========================================
 
-    candidates.sort(
-      (a, b) =>
-        b.area - a.area
-    )
+    const points = []
 
-    const best =
-      candidates[0]
+    for (
+      let i = 0;
+      i < bestContour.rows;
+      i++
+    ) {
+      const x =
+        bestContour.intPtr(i, 0)[0]
 
-    const points =
-      best.points
+      const y =
+        bestContour.intPtr(i, 0)[1]
 
-    // =================================================
-    // 11. URUTKAN 4 SUDUT
-    // =================================================
+      points.push({
+        x,
+        y
+      })
+    }
+
+    // ==========================================
+    // URUTKAN:
+    // kiri atas
+    // kanan atas
+    // kanan bawah
+    // kiri bawah
+    // ==========================================
+
+    const sum = p =>
+      p.x + p.y
+
+    const diff = p =>
+      p.x - p.y
 
     const topLeft =
       points.reduce(
         (best, p) =>
-          p.x + p.y <
-          best.x + best.y
+          sum(p) < sum(best)
             ? p
             : best
       )
@@ -567,8 +438,7 @@ const detectAnswerSheet = (canvas) => {
     const bottomRight =
       points.reduce(
         (best, p) =>
-          p.x + p.y >
-          best.x + best.y
+          sum(p) > sum(best)
             ? p
             : best
       )
@@ -576,8 +446,7 @@ const detectAnswerSheet = (canvas) => {
     const topRight =
       points.reduce(
         (best, p) =>
-          p.x - p.y >
-          best.x - best.y
+          diff(p) > diff(best)
             ? p
             : best
       )
@@ -585,167 +454,35 @@ const detectAnswerSheet = (canvas) => {
     const bottomLeft =
       points.reduce(
         (best, p) =>
-          p.x - p.y <
-          best.x - best.y
+          diff(p) < diff(best)
             ? p
             : best
       )
 
-    // =================================================
-    // 12. VALIDASI UKURAN
-    // =================================================
+    bestContour.delete()
 
-    const widthTop =
-      Math.hypot(
-        topRight.x - topLeft.x,
-        topRight.y - topLeft.y
-      )
-
-    const widthBottom =
-      Math.hypot(
-        bottomRight.x - bottomLeft.x,
-        bottomRight.y - bottomLeft.y
-      )
-
-    const heightLeft =
-      Math.hypot(
-        bottomLeft.x - topLeft.x,
-        bottomLeft.y - topLeft.y
-      )
-
-    const heightRight =
-      Math.hypot(
-        bottomRight.x - topRight.x,
-        bottomRight.y - topRight.y
-      )
-
-    const averageWidth =
-      (
-        widthTop +
-        widthBottom
-      ) / 2
-
-    const averageHeight =
-      (
-        heightLeft +
-        heightRight
-      ) / 2
-
-    const ratio =
-      averageWidth /
-      averageHeight
-
-    // =================================================
-    // 13. TOLERANSI RASIO
-    // =================================================
-
-    if (
-      ratio < 0.40 ||
-      ratio > 0.95
-    ) {
-
-      return {
-        detected: false,
-        message:
-          "❌ Bentuk LJK belum cukup jelas. Coba masukkan seluruh kertas ke dalam kotak scanner."
-      }
-
-    }
-
-    const markers = {
-      topLeft: {
-        x: topLeft.x,
-        y: topLeft.y
-      },
-
-      topRight: {
-        x: topRight.x,
-        y: topRight.y
-      },
-
-      bottomLeft: {
-        x: bottomLeft.x,
-        y: bottomLeft.y
-      },
-
-      bottomRight: {
-        x: bottomRight.x,
-        y: bottomRight.y
-      }
-    }
-
-    console.log(
-      "===== LJK TERDETEKSI ====="
-    )
-
-    console.log(
-      "Jumlah kandidat:",
-      candidates.length
-    )
-
-    console.log(
-      "Area:",
-      Math.round(best.area)
-    )
-
-    console.log(
-      "Rasio:",
-      ratio
-    )
-
-    console.log(
-      "TL:",
-      markers.topLeft
-    )
-
-    console.log(
-      "TR:",
-      markers.topRight
-    )
-
-    console.log(
-      "BL:",
-      markers.bottomLeft
-    )
-
-    console.log(
-      "BR:",
-      markers.bottomRight
-    )
-
-    return {
-      detected: true,
-
-      message:
-        "✅ LJK berhasil ditemukan.",
-
-      markers
-    }
+    return [
+      topLeft,
+      topRight,
+      bottomRight,
+      bottomLeft
+    ]
 
   } catch (error) {
-
     console.error(
       "ERROR DETEKSI LJK:",
       error
     )
 
-    return {
-      detected: false,
-      message:
-        "❌ Gagal mendeteksi LJK."
-    }
+    return null
 
   } finally {
-
     if (src) src.delete()
     if (gray) gray.delete()
     if (blur) blur.delete()
-    if (threshold) threshold.delete()
     if (edges) edges.delete()
-    if (dilated) dilated.delete()
     if (contours) contours.delete()
     if (hierarchy) hierarchy.delete()
-    if (kernel) kernel.delete()
   }
 }
   // =========================
