@@ -1274,75 +1274,43 @@ const readStudentAnswers = (
     // Garis lingkaran TIDAK dihitung.
     // =====================================================
 
-    // =====================================================
-    // FUNGSI HITUNG TINTA
-    //
-    // Bisa membaca pensil yang abu-abu.
-    // Tidak hanya mencari hitam pekat,
-    // tetapi membandingkan bagian tengah bubble
-    // dengan area sekitar bubble.
-    // =====================================================
-
     const calculateInk = (
       centerX,
       centerY,
       radius
     ) => {
 
-      // =====================================================
-      // AREA TENGAH BUBBLE
-      //
-      // Hanya bagian dalam yang dihitung.
-      // Garis lingkaran TIDAK ikut dihitung.
-      // =====================================================
-
       const innerRadius =
         Math.max(
           2,
-          radius * 0.30
+          radius * 0.43
         )
 
-      // =====================================================
-      // AREA BACKGROUND
-      //
-      // Ambil area di luar garis bubble.
-      // Jadi kita bisa membandingkan:
-      //
-      // tengah bubble vs kertas di sekitarnya
-      // =====================================================
-
-      const backgroundInner =
-        radius * 0.90
-
-      const backgroundOuter =
-        radius * 1.25
-
-      let innerSum = 0
-      let innerCount = 0
-
-      let backgroundSum = 0
-      let backgroundCount = 0
-
       let darkPixels = 0
+      let totalPixels = 0
 
       const minX =
         Math.floor(
-          centerX - backgroundOuter
+          centerX -
+          innerRadius
         )
 
       const maxX =
         Math.ceil(
-          centerX + backgroundOuter
+          centerX +
+          innerRadius
         )
 
       const minY =
         Math.floor(
-          centerY - backgroundOuter
+          centerY -
+          innerRadius
         )
 
       const maxY =
         Math.ceil(
-          centerY + backgroundOuter
+          centerY +
+          innerRadius
         )
 
       for (
@@ -1377,11 +1345,14 @@ const readStudentAnswers = (
           const dy =
             y - centerY
 
-          const distance =
-            Math.sqrt(
-              dx * dx +
-              dy * dy
-            )
+          if (
+            dx * dx +
+            dy * dy >
+            innerRadius *
+            innerRadius
+          ) {
+            continue
+          }
 
           const value =
             gray.ucharPtr(
@@ -1389,100 +1360,26 @@ const readStudentAnswers = (
               x
             )[0]
 
-          // =================================================
-          // TENGAH BUBBLE
-          // =================================================
-
           if (
-            distance <=
-            innerRadius
+            value < 130
           ) {
-
-            innerSum += value
-            innerCount++
-
-            // Pensil abu-abu tetap bisa terbaca
-            if (
-              value < 190
-            ) {
-              darkPixels++
-            }
-
+            darkPixels++
           }
 
-          // =================================================
-          // BACKGROUND
-          //
-          // Sengaja dilewati area garis bubble
-          // =================================================
-
-          else if (
-            distance >=
-              backgroundInner &&
-            distance <=
-              backgroundOuter
-          ) {
-
-            backgroundSum += value
-            backgroundCount++
-
-          }
+          totalPixels++
         }
       }
 
       if (
-        innerCount === 0 ||
-        backgroundCount === 0
+        totalPixels === 0
       ) {
         return 0
       }
 
-      const innerMean =
-        innerSum /
-        innerCount
-
-      const backgroundMean =
-        backgroundSum /
-        backgroundCount
-
-      const darkRatio =
+      return (
         darkPixels /
-        innerCount
-
-      // =====================================================
-      // SEBERAPA GELAP TENGAH BUBBLE
-      // =====================================================
-
-      const darknessDifference =
-        Math.max(
-          0,
-          backgroundMean -
-            innerMean
-        )
-
-      // Normalisasi kontras
-      const contrastScore =
-        Math.min(
-          1,
-          darknessDifference / 45
-        )
-
-      // =====================================================
-      // SCORE AKHIR
-      //
-      // Kontras = 70%
-      // Pixel gelap = 30%
-      // =====================================================
-
-      const score =
-        (
-          contrastScore * 0.70
-        ) +
-        (
-          darkRatio * 0.30
-        )
-
-      return score
+        totalPixels
+      )
     }
 
     // =====================================================
@@ -1773,10 +1670,10 @@ const readStudentAnswers = (
         // THRESHOLD
         // ===============================================
 
-       const emptyThreshold =
-        totalQuestions >= 80
-          ? 0.24
-          : 0.18
+        const emptyThreshold =
+          totalQuestions >= 80
+            ? 0.24
+            : 0.18
 
         const doubleRatio =
           0.72
