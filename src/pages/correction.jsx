@@ -1280,31 +1280,38 @@ const readStudentAnswers = (
       radius
     ) => {
 
-      // Area bagian dalam lingkaran
-      // Sengaja tidak sampai ke garis lingkaran
-      const innerRadius = Math.max(
-        2,
-        radius * 0.45
-      )
+      const innerRadius =
+        Math.max(
+          2,
+          radius * 0.43
+        )
 
       let darkPixels = 0
       let totalPixels = 0
 
-      const minX = Math.floor(
-        centerX - innerRadius
-      )
+      const minX =
+        Math.floor(
+          centerX -
+          innerRadius
+        )
 
-      const maxX = Math.ceil(
-        centerX + innerRadius
-      )
+      const maxX =
+        Math.ceil(
+          centerX +
+          innerRadius
+        )
 
-      const minY = Math.floor(
-        centerY - innerRadius
-      )
+      const minY =
+        Math.floor(
+          centerY -
+          innerRadius
+        )
 
-      const maxY = Math.ceil(
-        centerY + innerRadius
-      )
+      const maxY =
+        Math.ceil(
+          centerY +
+          innerRadius
+        )
 
       for (
         let y = minY;
@@ -1332,39 +1339,47 @@ const readStudentAnswers = (
             continue
           }
 
-          const dx = x - centerX
-          const dy = y - centerY
+          const dx =
+            x - centerX
 
-          // Hanya bagian dalam lingkaran
+          const dy =
+            y - centerY
+
           if (
             dx * dx +
             dy * dy >
-            innerRadius * innerRadius
+            innerRadius *
+            innerRadius
           ) {
             continue
           }
 
           const value =
-            gray.ucharPtr(y, x)[0]
+            gray.ucharPtr(
+              y,
+              x
+            )[0]
 
-          totalPixels++
-
-          // =========================
-          // DETEKSI COREtan
-          // =========================
-          // 180 dibuat lebih sensitif
-          // supaya pensil tipis tetap terbaca
-          if (value < 200) {
+          if (
+            value < 130
+          ) {
             darkPixels++
           }
+
+          totalPixels++
         }
       }
 
-      if (totalPixels === 0) {
+      if (
+        totalPixels === 0
+      ) {
         return 0
       }
 
-      return darkPixels / totalPixels
+      return (
+        darkPixels /
+        totalPixels
+      )
     }
 
     // =====================================================
