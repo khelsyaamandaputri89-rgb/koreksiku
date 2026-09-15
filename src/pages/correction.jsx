@@ -1775,8 +1775,8 @@ const readStudentAnswers = (
 
        const emptyThreshold =
         totalQuestions >= 80
-          ? 0.22
-          : 0.20
+          ? 0.24
+          : 0.18
 
         const doubleRatio =
           0.72
