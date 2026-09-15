@@ -1274,43 +1274,62 @@ const readStudentAnswers = (
     // Garis lingkaran TIDAK dihitung.
     // =====================================================
 
+    // =====================================================
+    // FUNGSI HITUNG TINTA
+    //
+    // Bisa membaca pensil yang abu-abu.
+    // Tidak hanya mencari hitam pekat,
+    // tetapi membandingkan bagian tengah bubble
+    // dengan area sekitar bubble.
+    // =====================================================
+
     const calculateInk = (
       centerX,
       centerY,
       radius
     ) => {
 
+      // Bagian tengah bubble
       const innerRadius =
         Math.max(
           2,
-          radius * 0.43
+          radius * 0.42
         )
 
+      // Area sekitar bubble untuk mengetahui
+      // warna/kecerahan kertas di lokasi tersebut
+      const outerRadius =
+        Math.max(
+          innerRadius + 2,
+          radius * 0.82
+        )
+
+      let innerSum = 0
+      let innerCount = 0
+
+      let outerSum = 0
+      let outerCount = 0
+
       let darkPixels = 0
-      let totalPixels = 0
 
       const minX =
         Math.floor(
-          centerX -
-          innerRadius
+          centerX - outerRadius
         )
 
       const maxX =
         Math.ceil(
-          centerX +
-          innerRadius
+          centerX + outerRadius
         )
 
       const minY =
         Math.floor(
-          centerY -
-          innerRadius
+          centerY - outerRadius
         )
 
       const maxY =
         Math.ceil(
-          centerY +
-          innerRadius
+          centerY + outerRadius
         )
 
       for (
@@ -1345,14 +1364,11 @@ const readStudentAnswers = (
           const dy =
             y - centerY
 
-          if (
-            dx * dx +
-            dy * dy >
-            innerRadius *
-            innerRadius
-          ) {
-            continue
-          }
+          const distance =
+            Math.sqrt(
+              dx * dx +
+              dy * dy
+            )
 
           const value =
             gray.ucharPtr(
@@ -1360,26 +1376,104 @@ const readStudentAnswers = (
               x
             )[0]
 
+          // ===============================================
+          // BAGIAN TENGAH BUBBLE
+          // ===============================================
+
           if (
-            value < 130
+            distance <=
+            innerRadius
           ) {
-            darkPixels++
+
+            innerSum += value
+            innerCount++
+
+            // Threshold lebih tinggi
+            // supaya pensil tetap terbaca
+            if (
+              value < 200
+            ) {
+              darkPixels++
+            }
+
           }
 
-          totalPixels++
+          // ===============================================
+          // AREA LUAR BUBBLE
+          // Digunakan sebagai pembanding
+          // ===============================================
+
+          else if (
+            distance >=
+              radius * 0.60 &&
+            distance <=
+              outerRadius
+          ) {
+
+            outerSum += value
+            outerCount++
+
+          }
         }
       }
 
       if (
-        totalPixels === 0
+        innerCount === 0 ||
+        outerCount === 0
       ) {
         return 0
       }
 
-      return (
+      const innerMean =
+        innerSum /
+        innerCount
+
+      const outerMean =
+        outerSum /
+        outerCount
+
+      const darkRatio =
         darkPixels /
-        totalPixels
-      )
+        innerCount
+
+      // ===============================================
+      // SELISIH KECERAHAN
+      //
+      // Kalau tengah bubble lebih gelap daripada
+      // kertas di sekitarnya → kemungkinan diisi.
+      // ===============================================
+
+      const darknessDifference =
+        Math.max(
+          0,
+          outerMean -
+            innerMean
+        )
+
+      // Ubah menjadi nilai 0 - 1
+      const contrastScore =
+        Math.min(
+          1,
+          darknessDifference /
+            70
+        )
+
+      // ===============================================
+      // GABUNGKAN:
+      //
+      // 65% = perbedaan kegelapan
+      // 35% = jumlah pixel gelap
+      // ===============================================
+
+      const score =
+        (
+          contrastScore * 0.65
+        ) +
+        (
+          darkRatio * 0.35
+        )
+
+      return score
     }
 
     // =====================================================
@@ -1670,10 +1764,10 @@ const readStudentAnswers = (
         // THRESHOLD
         // ===============================================
 
-        const emptyThreshold =
-          totalQuestions >= 80
-            ? 0.24
-            : 0.18
+       const emptyThreshold =
+        totalQuestions >= 80
+          ? 0.16
+          : 0.14
 
         const doubleRatio =
           0.72
