@@ -262,26 +262,50 @@ function correction() {
 // =====================================================
 
 const detectAnswerSheet = (canvas) => {
+  if (!window.cv || !window.cv.Mat) {
+    return {
+      detected: false,
+      message: "OpenCV belum siap."
+    }
+  }
+
   const cv = window.cv
 
   let src = null
   let gray = null
   let blur = null
+  let threshold = null
   let edges = null
+  let dilated = null
   let contours = null
   let hierarchy = null
+  let kernel = null
 
   try {
     src = cv.imread(canvas)
 
+    const imageWidth = src.cols
+    const imageHeight = src.rows
+    const imageArea = imageWidth * imageHeight
+
+    // =================================================
+    // 1. GRAYSCALE
+    // =================================================
+
     gray = new cv.Mat()
+
     cv.cvtColor(
       src,
       gray,
       cv.COLOR_RGBA2GRAY
     )
 
+    // =================================================
+    // 2. BLUR
+    // =================================================
+
     blur = new cv.Mat()
+
     cv.GaussianBlur(
       gray,
       blur,
@@ -289,62 +313,98 @@ const detectAnswerSheet = (canvas) => {
       0
     )
 
+    // =================================================
+    // 3. THRESHOLD
+    //
+    // Membantu ketika cahaya tidak merata
+    // =================================================
+
+    threshold = new cv.Mat()
+
+    cv.adaptiveThreshold(
+      blur,
+      threshold,
+      255,
+      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+      cv.THRESH_BINARY,
+      31,
+      10
+    )
+
+    // =================================================
+    // 4. EDGE
+    // =================================================
+
     edges = new cv.Mat()
 
     cv.Canny(
       blur,
       edges,
-      50,
-      150
+      30,
+      100
     )
 
-    // Perbesar sedikit garis tepi
-    const kernel = cv.Mat.ones(
-      3,
-      3,
-      cv.CV_8U
+    // =================================================
+    // 5. DILATE
+    //
+    // Sambungkan garis tepi kertas
+    // =================================================
+
+    kernel = cv.getStructuringElement(
+      cv.MORPH_RECT,
+      new cv.Size(5, 5)
     )
+
+    dilated = new cv.Mat()
 
     cv.dilate(
       edges,
-      edges,
-      kernel
+      dilated,
+      kernel,
+      new cv.Point(-1, -1),
+      2
     )
 
-    kernel.delete()
+    // =================================================
+    // 6. CARI CONTOUR
+    // =================================================
 
     contours = new cv.MatVector()
     hierarchy = new cv.Mat()
 
     cv.findContours(
-      edges,
+      dilated,
       contours,
       hierarchy,
       cv.RETR_EXTERNAL,
       cv.CHAIN_APPROX_SIMPLE
     )
 
-    let bestContour = null
-    let bestArea = 0
+    // =================================================
+    // 7. CARI KANDIDAT KERTAS
+    //
+    // Jangan terlalu ketat.
+    // LJK boleh lebih kecil / bergeser.
+    // =================================================
 
-    const imageArea =
-      canvas.width * canvas.height
+    let candidates = []
 
     for (
       let i = 0;
       i < contours.size();
       i++
     ) {
+
       const contour =
         contours.get(i)
 
       const area =
         cv.contourArea(contour)
 
-      // Kertas harus cukup besar
+      // LJK minimal sekitar 10% frame
       if (
-        area < imageArea * 0.20 ||
-        area > imageArea * 0.95
+        area < imageArea * 0.10 ||
+        area > imageArea * 0.97
       ) {
         contour.delete()
         continue
@@ -362,75 +422,144 @@ const detectAnswerSheet = (canvas) => {
       cv.approxPolyDP(
         contour,
         approx,
-        perimeter * 0.02,
+        0.035 * perimeter,
         true
       )
 
-      // Cari kontur yang benar-benar
-      // memiliki 4 sudut
+      // =================================================
+      // 8. CARI 4 SUDUT
+      // Toleransi diperbesar
+      // =================================================
+
       if (
-        approx.rows === 4 &&
-        area > bestArea
+        approx.rows === 4
       ) {
-        if (bestContour) {
-          bestContour.delete()
+
+        const points = []
+
+        for (
+          let p = 0;
+          p < 4;
+          p++
+        ) {
+
+          points.push({
+            x: approx.data32S[p * 2],
+            y: approx.data32S[p * 2 + 1]
+          })
+
         }
 
-        bestContour =
-          approx.clone()
+        // ===============================================
+        // HITUNG BOUNDING RECT
+        // ===============================================
 
-        bestArea = area
+        const xs =
+          points.map(
+            p => p.x
+          )
+
+        const ys =
+          points.map(
+            p => p.y
+          )
+
+        const minX =
+          Math.min(...xs)
+
+        const maxX =
+          Math.max(...xs)
+
+        const minY =
+          Math.min(...ys)
+
+        const maxY =
+          Math.max(...ys)
+
+        const boxWidth =
+          maxX - minX
+
+        const boxHeight =
+          maxY - minY
+
+        if (
+          boxWidth > 0 &&
+          boxHeight > 0
+        ) {
+
+          const ratio =
+            boxWidth /
+            boxHeight
+
+          // =============================================
+          // F4 portrait:
+          // sekitar 0.636
+          //
+          // Dibuat lebih longgar
+          // =============================================
+
+          if (
+            ratio >= 0.40 &&
+            ratio <= 0.95
+          ) {
+
+            candidates.push({
+              area,
+              points
+            })
+
+          }
+
+        }
+
       }
 
       approx.delete()
       contour.delete()
     }
 
-    if (!bestContour) {
-      return null
-    }
+    // =================================================
+    // 9. KALAU TIDAK ADA QUADRILATERAL
+    // =================================================
 
-    // ==========================================
-    // AMBIL 4 SUDUT ASLI KERTAS
-    // ==========================================
-
-    const points = []
-
-    for (
-      let i = 0;
-      i < bestContour.rows;
-      i++
+    if (
+      candidates.length === 0
     ) {
-      const x =
-        bestContour.intPtr(i, 0)[0]
 
-      const y =
-        bestContour.intPtr(i, 0)[1]
+      return {
+        detected: false,
+        message:
+          "❌ LJK belum terdeteksi. Pastikan seluruh kertas berada di dalam kotak scanner."
+      }
 
-      points.push({
-        x,
-        y
-      })
     }
 
-    // ==========================================
-    // URUTKAN:
-    // kiri atas
-    // kanan atas
-    // kanan bawah
-    // kiri bawah
-    // ==========================================
+    // =================================================
+    // 10. PILIH KERTAS TERBESAR
+    //
+    // Jadi posisi tidak harus di tengah.
+    // =================================================
 
-    const sum = p =>
-      p.x + p.y
+    candidates.sort(
+      (a, b) =>
+        b.area - a.area
+    )
 
-    const diff = p =>
-      p.x - p.y
+    const best =
+      candidates[0]
+
+    const points =
+      best.points
+
+    // =================================================
+    // 11. URUTKAN 4 SUDUT
+    // =================================================
 
     const topLeft =
       points.reduce(
         (best, p) =>
-          sum(p) < sum(best)
+          p.x + p.y <
+          best.x + best.y
             ? p
             : best
       )
@@ -438,7 +567,8 @@ const detectAnswerSheet = (canvas) => {
     const bottomRight =
       points.reduce(
         (best, p) =>
-          sum(p) > sum(best)
+          p.x + p.y >
+          best.x + best.y
             ? p
             : best
       )
@@ -446,7 +576,8 @@ const detectAnswerSheet = (canvas) => {
     const topRight =
       points.reduce(
         (best, p) =>
-          diff(p) > diff(best)
+          p.x - p.y >
+          best.x - best.y
             ? p
             : best
       )
@@ -454,35 +585,167 @@ const detectAnswerSheet = (canvas) => {
     const bottomLeft =
       points.reduce(
         (best, p) =>
-          diff(p) < diff(best)
+          p.x - p.y <
+          best.x - best.y
             ? p
             : best
       )
 
-    bestContour.delete()
+    // =================================================
+    // 12. VALIDASI UKURAN
+    // =================================================
 
-    return [
-      topLeft,
-      topRight,
-      bottomRight,
-      bottomLeft
-    ]
+    const widthTop =
+      Math.hypot(
+        topRight.x - topLeft.x,
+        topRight.y - topLeft.y
+      )
+
+    const widthBottom =
+      Math.hypot(
+        bottomRight.x - bottomLeft.x,
+        bottomRight.y - bottomLeft.y
+      )
+
+    const heightLeft =
+      Math.hypot(
+        bottomLeft.x - topLeft.x,
+        bottomLeft.y - topLeft.y
+      )
+
+    const heightRight =
+      Math.hypot(
+        bottomRight.x - topRight.x,
+        bottomRight.y - topRight.y
+      )
+
+    const averageWidth =
+      (
+        widthTop +
+        widthBottom
+      ) / 2
+
+    const averageHeight =
+      (
+        heightLeft +
+        heightRight
+      ) / 2
+
+    const ratio =
+      averageWidth /
+      averageHeight
+
+    // =================================================
+    // 13. TOLERANSI RASIO
+    // =================================================
+
+    if (
+      ratio < 0.40 ||
+      ratio > 0.95
+    ) {
+
+      return {
+        detected: false,
+        message:
+          "❌ Bentuk LJK belum cukup jelas. Coba masukkan seluruh kertas ke dalam kotak scanner."
+      }
+
+    }
+
+    const markers = {
+      topLeft: {
+        x: topLeft.x,
+        y: topLeft.y
+      },
+
+      topRight: {
+        x: topRight.x,
+        y: topRight.y
+      },
+
+      bottomLeft: {
+        x: bottomLeft.x,
+        y: bottomLeft.y
+      },
+
+      bottomRight: {
+        x: bottomRight.x,
+        y: bottomRight.y
+      }
+    }
+
+    console.log(
+      "===== LJK TERDETEKSI ====="
+    )
+
+    console.log(
+      "Jumlah kandidat:",
+      candidates.length
+    )
+
+    console.log(
+      "Area:",
+      Math.round(best.area)
+    )
+
+    console.log(
+      "Rasio:",
+      ratio
+    )
+
+    console.log(
+      "TL:",
+      markers.topLeft
+    )
+
+    console.log(
+      "TR:",
+      markers.topRight
+    )
+
+    console.log(
+      "BL:",
+      markers.bottomLeft
+    )
+
+    console.log(
+      "BR:",
+      markers.bottomRight
+    )
+
+    return {
+      detected: true,
+
+      message:
+        "✅ LJK berhasil ditemukan.",
+
+      markers
+    }
 
   } catch (error) {
+
     console.error(
       "ERROR DETEKSI LJK:",
       error
     )
 
-    return null
+    return {
+      detected: false,
+      message:
+        "❌ Gagal mendeteksi LJK."
+    }
 
   } finally {
+
     if (src) src.delete()
     if (gray) gray.delete()
     if (blur) blur.delete()
+    if (threshold) threshold.delete()
     if (edges) edges.delete()
+    if (dilated) dilated.delete()
     if (contours) contours.delete()
     if (hierarchy) hierarchy.delete()
+    if (kernel) kernel.delete()
   }
 }
   // =========================
@@ -608,9 +871,8 @@ const readStudentAnswers = (
       0
     )
 
-
     // =====================================================
-    // KONFIGURASI LJK
+    // KONFIGURASI
     // =====================================================
 
     const columnCount =
@@ -624,10 +886,8 @@ const readStudentAnswers = (
           columnCount
       )
 
-
     // =====================================================
     // UKURAN BUBBLE
-    // Sama dengan AnswerSheet.jsx
     // =====================================================
 
     let bubbleSizeMm
@@ -635,23 +895,32 @@ const readStudentAnswers = (
     if (
       totalQuestions >= 100
     ) {
+
       bubbleSizeMm = 4
+
     } else if (
       totalQuestions >= 90
     ) {
+
       bubbleSizeMm = 4.2
+
     } else if (
       totalQuestions >= 80
     ) {
+
       bubbleSizeMm = 4.3
+
     } else if (
       totalQuestions >= 70
     ) {
-      bubbleSizeMm = 4.5
-    } else {
-      bubbleSizeMm = 5
-    }
 
+      bubbleSizeMm = 4.5
+
+    } else {
+
+      bubbleSizeMm = 5
+
+    }
 
     // =====================================================
     // PIXEL PER MM
@@ -662,19 +931,19 @@ const readStudentAnswers = (
 
     const expectedRadius =
       (
-        bubbleSizeMm / 2
+        bubbleSizeMm /
+        2
       ) * pxPerMm
 
-
     // =====================================================
-    // DETEKSI CIRCLE
+    // DETEKSI LINGKARAN BUBBLE
     // =====================================================
 
     circles = new cv.Mat()
 
     const minRadius =
       Math.max(
-        4,
+        5,
         Math.floor(
           expectedRadius * 0.55
         )
@@ -687,9 +956,9 @@ const readStudentAnswers = (
 
     const minDistance =
       Math.max(
-        7,
+        8,
         Math.floor(
-          expectedRadius * 1.5
+          expectedRadius * 1.7
         )
       )
 
@@ -705,9 +974,9 @@ const readStudentAnswers = (
       maxRadius
     )
 
-
     // =====================================================
     // AMBIL CIRCLE
+    // HANYA AREA PILIHAN GANDA
     // =====================================================
 
     const rawCircles = []
@@ -727,8 +996,7 @@ const readStudentAnswers = (
       const r =
         circles.data32F[i * 3 + 2]
 
-
-      // Area PG saja
+      // Abaikan bagian atas dan bagian essay
       if (
         y < canvas.height * 0.20 ||
         y > canvas.height * 0.78
@@ -750,9 +1018,8 @@ const readStudentAnswers = (
       })
     }
 
-
     // =====================================================
-    // HAPUS DUPLIKAT
+    // HILANGKAN DUPLIKAT CIRCLE
     // =====================================================
 
     const detectedCircles = []
@@ -796,14 +1063,14 @@ const readStudentAnswers = (
       }
     }
 
-
     // =====================================================
-    // CEK CIRCLE
+    // KALAU CIRCLE TERLALU SEDIKIT
     // =====================================================
 
     if (
       detectedCircles.length < 20
     ) {
+
       return {
         answers: {},
         debug:
@@ -812,9 +1079,11 @@ const readStudentAnswers = (
       }
     }
 
-
     // =====================================================
     // CLUSTER X
+    //
+    // Bubble A dari semua baris akan berada
+    // pada jalur X yang sama.
     // =====================================================
 
     const sortedByX =
@@ -828,8 +1097,8 @@ const readStudentAnswers = (
 
     const xTolerance =
       Math.max(
-        7,
-        expectedRadius * 1.5
+        8,
+        expectedRadius * 1.7
       )
 
     for (
@@ -837,11 +1106,13 @@ const readStudentAnswers = (
     ) {
 
       let nearest = null
+
       let nearestDistance =
         Infinity
 
       for (
-        const cluster of xClusters
+        const cluster
+        of xClusters
       ) {
 
         const distance =
@@ -854,6 +1125,7 @@ const readStudentAnswers = (
           distance <
           nearestDistance
         ) {
+
           nearest =
             cluster
 
@@ -886,12 +1158,14 @@ const readStudentAnswers = (
           centerX: circle.x,
           points: [circle]
         })
+
       }
     }
 
-
     // =====================================================
-    // FILTER JALUR
+    // FILTER JALUR X
+    //
+    // Jalur bubble biasanya memiliki banyak circle.
     // =====================================================
 
     const minimumTrackCount =
@@ -899,7 +1173,7 @@ const readStudentAnswers = (
         5,
         Math.floor(
           questionsPerColumn *
-          0.18
+          0.20
         )
       )
 
@@ -910,6 +1184,9 @@ const readStudentAnswers = (
           minimumTrackCount
       )
 
+    // =====================================================
+    // SORT X
+    // =====================================================
 
     validXClusters.sort(
       (a, b) =>
@@ -917,15 +1194,18 @@ const readStudentAnswers = (
         b.centerX
     )
 
+    // =====================================================
+    // KITA BUTUH:
+    //
+    // 2 kolom = 10 jalur
+    // 3 kolom = 15 jalur
+    // =====================================================
 
     const expectedTracks =
       columnCount * 5
 
-
-    // =====================================================
-    // KALAU TERLALU BANYAK JALUR
-    // =====================================================
-
+    // Kalau terlalu banyak,
+    // ambil jalur dengan jumlah circle terbanyak
     if (
       validXClusters.length >
       expectedTracks
@@ -949,6 +1229,9 @@ const readStudentAnswers = (
           )
     }
 
+    // =====================================================
+    // CEK JUMLAH JALUR
+    // =====================================================
 
     if (
       validXClusters.length <
@@ -964,9 +1247,8 @@ const readStudentAnswers = (
       }
     }
 
-
     // =====================================================
-    // BAGI MENJADI KOLOM
+    // BAGI JALUR MENJADI KOLOM
     // =====================================================
 
     const columns = []
@@ -985,12 +1267,11 @@ const readStudentAnswers = (
       )
     }
 
-
     // =====================================================
-    // HITUNG TINTA
+    // FUNGSI HITUNG TINTA
     //
     // HANYA BAGIAN TENGAH BUBBLE
-    // GARIS LINGKARAN TIDAK DIHITUNG
+    // Garis lingkaran TIDAK dihitung.
     // =====================================================
 
     const calculateInk = (
@@ -999,39 +1280,31 @@ const readStudentAnswers = (
       radius
     ) => {
 
-      const innerRadius =
-        Math.max(
-          2,
-          radius * 0.45
-        )
+      // Area bagian dalam lingkaran
+      // Sengaja tidak sampai ke garis lingkaran
+      const innerRadius = Math.max(
+        2,
+        radius * 0.45
+      )
 
       let darkPixels = 0
       let totalPixels = 0
 
-      const minX =
-        Math.floor(
-          centerX -
-          innerRadius
-        )
+      const minX = Math.floor(
+        centerX - innerRadius
+      )
 
-      const maxX =
-        Math.ceil(
-          centerX +
-          innerRadius
-        )
+      const maxX = Math.ceil(
+        centerX + innerRadius
+      )
 
-      const minY =
-        Math.floor(
-          centerY -
-          innerRadius
-        )
+      const minY = Math.floor(
+        centerY - innerRadius
+      )
 
-      const maxY =
-        Math.ceil(
-          centerY +
-          innerRadius
-        )
-
+      const maxY = Math.ceil(
+        centerY + innerRadius
+      )
 
       for (
         let y = minY;
@@ -1059,177 +1332,47 @@ const readStudentAnswers = (
             continue
           }
 
-          const dx =
-            x - centerX
+          const dx = x - centerX
+          const dy = y - centerY
 
-          const dy =
-            y - centerY
-
+          // Hanya bagian dalam lingkaran
           if (
             dx * dx +
             dy * dy >
-            innerRadius *
-            innerRadius
+            innerRadius * innerRadius
           ) {
             continue
           }
 
           const value =
-            gray.ucharPtr(
-              y,
-              x
-            )[0]
+            gray.ucharPtr(y, x)[0]
 
           totalPixels++
 
-          // Pensil tipis tetap dihitung
-          if (
-            value < 200
-          ) {
+          // =========================
+          // DETEKSI COREtan
+          // =========================
+          // 180 dibuat lebih sensitif
+          // supaya pensil tipis tetap terbaca
+          if (value < 200) {
             darkPixels++
           }
         }
       }
 
-      if (
-        totalPixels === 0
-      ) {
+      if (totalPixels === 0) {
         return 0
       }
 
-      return (
-        darkPixels /
-        totalPixels
-      )
+      return darkPixels / totalPixels
     }
 
-
     // =====================================================
-    // KOREKSI KEMIRINGAN BARIS
-    //
-    // Ini bagian penting.
-    //
-    // Kalau kertas miring, Y bubble A-E
-    // tidak harus sama persis.
-    //
-    // Kita estimasi kemiringan dari
-    // semua circle dalam satu kolom.
-    // =====================================================
-
-    const getTiltSlope = (
-      column
-    ) => {
-
-      const points = []
-
-      column.forEach(
-        track => {
-
-          track.points.forEach(
-            point => {
-
-              points.push({
-                x: point.x,
-                y: point.y
-              })
-
-            }
-          )
-
-        }
-      )
-
-
-      if (
-        points.length < 10
-      ) {
-        return 0
-      }
-
-
-      const meanX =
-        points.reduce(
-          (sum, p) =>
-            sum + p.x,
-          0
-        ) /
-        points.length
-
-      const meanY =
-        points.reduce(
-          (sum, p) =>
-            sum + p.y,
-          0
-        ) /
-        points.length
-
-
-      let numerator = 0
-      let denominator = 0
-
-      points.forEach(
-        p => {
-
-          numerator +=
-            (
-              p.x - meanX
-            ) *
-            (
-              p.y - meanY
-            )
-
-          denominator +=
-            (
-              p.x - meanX
-            ) *
-            (
-              p.x - meanX
-            )
-        }
-      )
-
-
-      if (
-        denominator === 0
-      ) {
-        return 0
-      }
-
-      return (
-        numerator /
-        denominator
-      )
-    }
-
-
-    // =====================================================
-    // NORMALISASI Y
-    //
-    // yCorrected = y - slope*x
-    //
-    // Jadi kertas miring sedikit
-    // tetap dianggap satu baris.
-    // =====================================================
-
-    const normalizeY = (
-      point,
-      slope
-    ) => {
-
-      return (
-        point.y -
-        slope * point.x
-      )
-    }
-
-
-    // =====================================================
-    // GROUP BARIS
+    // CARI BARIS BERDASARKAN CIRCLE
     // =====================================================
 
     const groupRows = (
-      column,
-      slope
+      column
     ) => {
 
       const allPoints = []
@@ -1243,12 +1386,7 @@ const readStudentAnswers = (
               allPoints.push({
                 x: point.x,
                 y: point.y,
-                r: point.r,
-                normalizedY:
-                  normalizeY(
-                    point,
-                    slope
-                  )
+                r: point.r
               })
 
             }
@@ -1257,58 +1395,51 @@ const readStudentAnswers = (
         }
       )
 
-
       allPoints.sort(
         (a, b) =>
-          a.normalizedY -
-          b.normalizedY
+          a.y - b.y
       )
-
 
       const rows = []
 
       const yTolerance =
         Math.max(
-          5,
-          expectedRadius * 1.25
+          6,
+          expectedRadius * 1.45
         )
-
 
       for (
         const point of allPoints
       ) {
 
         let nearest = null
-        let nearestDistance =
+
+        let distance =
           Infinity
 
         for (
           const row of rows
         ) {
 
-          const distance =
+          const d =
             Math.abs(
-              point.normalizedY -
+              point.y -
               row.centerY
             )
 
           if (
-            distance <
-            nearestDistance
+            d < distance
           ) {
 
-            nearest =
-              row
+            distance = d
+            nearest = row
 
-            nearestDistance =
-              distance
           }
         }
 
-
         if (
           nearest &&
-          nearestDistance <=
+          distance <=
             yTolerance
         ) {
 
@@ -1319,8 +1450,7 @@ const readStudentAnswers = (
           nearest.centerY =
             nearest.points.reduce(
               (sum, p) =>
-                sum +
-                p.normalizedY,
+                sum + p.y,
               0
             ) /
             nearest.points.length
@@ -1328,17 +1458,12 @@ const readStudentAnswers = (
         } else {
 
           rows.push({
-            centerY:
-              point.normalizedY,
-
-            points: [
-              point
-            ]
+            centerY: point.y,
+            points: [point]
           })
 
         }
       }
-
 
       rows.sort(
         (a, b) =>
@@ -1346,10 +1471,8 @@ const readStudentAnswers = (
           b.centerY
       )
 
-
       return rows
     }
-
 
     // =====================================================
     // JAWABAN
@@ -1373,7 +1496,6 @@ const readStudentAnswers = (
 
     let totalRowsDetected = 0
 
-
     // =====================================================
     // PROSES SETIAP KOLOM
     // =====================================================
@@ -1387,23 +1509,12 @@ const readStudentAnswers = (
       const column =
         columns[columnIndex]
 
-
-      // Hitung kemiringan kolom
-      const slope =
-        getTiltSlope(
-          column
-        )
-
-
       const rows =
-        groupRows(
-          column,
-          slope
-        )
-
+        groupRows(column)
 
       // ===================================================
-      // AMBIL JUMLAH BARIS SESUAI JUMLAH SOAL
+      // KARENA KITA TAHU JUMLAH SOAL,
+      // BUANG ROW PALSU
       // ===================================================
 
       const rowCount =
@@ -1415,11 +1526,6 @@ const readStudentAnswers = (
       totalRowsDetected +=
         rowCount
 
-
-      // ===================================================
-      // PROSES SETIAP BARIS
-      // ===================================================
-
       for (
         let rowIndex = 0;
         rowIndex < rowCount;
@@ -1429,13 +1535,11 @@ const readStudentAnswers = (
         const row =
           rows[rowIndex]
 
+        // ===============================================
+        // CARI NILAI TINTA A-E
+        // ===============================================
 
         const inkValues = []
-
-
-        // =================================================
-        // A - E
-        // =================================================
 
         for (
           let choiceIndex = 0;
@@ -1448,32 +1552,23 @@ const readStudentAnswers = (
               choiceIndex
             ]
 
-
+          // Cari circle yang paling dekat
+          // dengan Y baris ini
           let bestPoint = null
 
           let bestDistance =
             Infinity
 
-
-          // Cari circle pada jalur
-          // yang paling dekat dengan baris
           for (
-            const point of
-            track.points
+            const point
+            of track.points
           ) {
-
-            const normalizedPointY =
-              normalizeY(
-                point,
-                slope
-              )
 
             const distance =
               Math.abs(
-                normalizedPointY -
+                point.y -
                 row.centerY
               )
-
 
             if (
               distance <
@@ -1488,18 +1583,15 @@ const readStudentAnswers = (
             }
           }
 
-
-          // =================================================
-          // JANGAN PAKAI POSISI RATA-RATA
-          //
-          // Kalau circle memang tidak terdeteksi,
-          // anggap kosong.
-          // =================================================
+          // =============================================
+          // Kalau circle tidak ditemukan,
+          // gunakan posisi rata-rata track.
+          // =============================================
 
           if (
             bestPoint &&
             bestDistance <=
-              expectedRadius * 1.5
+              expectedRadius * 1.8
           ) {
 
             const ink =
@@ -1515,16 +1607,14 @@ const readStudentAnswers = (
 
           } else {
 
-            inkValues.push(
-              0
-            )
+            inkValues.push(0)
+
           }
         }
 
-
-        // =================================================
-        // CARI TINTA PALING TEBAL
-        // =================================================
+        // ===============================================
+        // CARI INK TERBESAR
+        // ===============================================
 
         let highestIndex = 0
 
@@ -1541,17 +1631,15 @@ const readStudentAnswers = (
             ]
           ) {
 
-            highestIndex =
-              i
+            highestIndex = i
+
           }
         }
-
 
         const highest =
           inkValues[
             highestIndex
           ]
-
 
         const sorted =
           [...inkValues]
@@ -1560,31 +1648,24 @@ const readStudentAnswers = (
                 b - a
             )
 
-
         const second =
           sorted[1] || 0
 
-
-        // =================================================
+        // ===============================================
         // THRESHOLD
-        //
-        // Kalau ada coretan yang cukup jelas
-        // dianggap TIDAK KOSONG.
-        // =================================================
+        // ===============================================
 
         const emptyThreshold =
           totalQuestions >= 80
-            ? 0.08
-            : 0.07
-
+            ? 0.24
+            : 0.18
 
         const doubleRatio =
-          0.78
+          0.72
 
-
-        // =================================================
+        // ===============================================
         // TENTUKAN JAWABAN
-        // =================================================
+        // ===============================================
 
         if (
           highest <
@@ -1601,7 +1682,7 @@ const readStudentAnswers = (
           doubleRatio
         ) {
 
-          // Dua bubble sama-sama terisi
+          // Dua bubble sama-sama hitam
           answers[
             questionNumber
           ] = ""
@@ -1618,12 +1699,12 @@ const readStudentAnswers = (
             ]
 
           answeredCount++
+
         }
 
-
-        // =================================================
+        // ===============================================
         // DEBUG
-        // =================================================
+        // ===============================================
 
         console.log(
           `SOAL ${questionNumber}`,
@@ -1636,18 +1717,12 @@ const readStudentAnswers = (
           "Y:",
           Math.round(
             row.centerY
-          ),
-          "Slope:",
-          Number(
-            slope.toFixed(4)
           )
         )
-
 
         questionNumber++
       }
     }
-
 
     // =====================================================
     // HASIL
@@ -1663,8 +1738,8 @@ const readStudentAnswers = (
         `Baris: ${totalRowsDetected} | ` +
         `Terbaca: ${answeredCount}/${totalQuestions} | ` +
         `Ganda: ${doubleCount}`
-    }
 
+    }
 
   } catch (
     error
@@ -1682,6 +1757,7 @@ const readStudentAnswers = (
       debug:
         "❌ Gagal membaca jawaban: " +
         error.message
+
     }
 
   } finally {
@@ -1697,6 +1773,7 @@ const readStudentAnswers = (
 
     if (blur)
       blur.delete()
+
   }
 }
 
