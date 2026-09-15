@@ -1289,47 +1289,60 @@ const readStudentAnswers = (
       radius
     ) => {
 
-      // Bagian tengah bubble
+      // =====================================================
+      // AREA TENGAH BUBBLE
+      //
+      // Hanya bagian dalam yang dihitung.
+      // Garis lingkaran TIDAK ikut dihitung.
+      // =====================================================
+
       const innerRadius =
         Math.max(
           2,
-          radius * 0.42
+          radius * 0.30
         )
 
-      // Area sekitar bubble untuk mengetahui
-      // warna/kecerahan kertas di lokasi tersebut
-      const outerRadius =
-        Math.max(
-          innerRadius + 2,
-          radius * 0.82
-        )
+      // =====================================================
+      // AREA BACKGROUND
+      //
+      // Ambil area di luar garis bubble.
+      // Jadi kita bisa membandingkan:
+      //
+      // tengah bubble vs kertas di sekitarnya
+      // =====================================================
+
+      const backgroundInner =
+        radius * 0.90
+
+      const backgroundOuter =
+        radius * 1.25
 
       let innerSum = 0
       let innerCount = 0
 
-      let outerSum = 0
-      let outerCount = 0
+      let backgroundSum = 0
+      let backgroundCount = 0
 
       let darkPixels = 0
 
       const minX =
         Math.floor(
-          centerX - outerRadius
+          centerX - backgroundOuter
         )
 
       const maxX =
         Math.ceil(
-          centerX + outerRadius
+          centerX + backgroundOuter
         )
 
       const minY =
         Math.floor(
-          centerY - outerRadius
+          centerY - backgroundOuter
         )
 
       const maxY =
         Math.ceil(
-          centerY + outerRadius
+          centerY + backgroundOuter
         )
 
       for (
@@ -1376,9 +1389,9 @@ const readStudentAnswers = (
               x
             )[0]
 
-          // ===============================================
-          // BAGIAN TENGAH BUBBLE
-          // ===============================================
+          // =================================================
+          // TENGAH BUBBLE
+          // =================================================
 
           if (
             distance <=
@@ -1388,30 +1401,30 @@ const readStudentAnswers = (
             innerSum += value
             innerCount++
 
-            // Threshold lebih tinggi
-            // supaya pensil tetap terbaca
+            // Pensil abu-abu tetap bisa terbaca
             if (
-              value < 200
+              value < 190
             ) {
               darkPixels++
             }
 
           }
 
-          // ===============================================
-          // AREA LUAR BUBBLE
-          // Digunakan sebagai pembanding
-          // ===============================================
+          // =================================================
+          // BACKGROUND
+          //
+          // Sengaja dilewati area garis bubble
+          // =================================================
 
           else if (
             distance >=
-              radius * 0.60 &&
+              backgroundInner &&
             distance <=
-              outerRadius
+              backgroundOuter
           ) {
 
-            outerSum += value
-            outerCount++
+            backgroundSum += value
+            backgroundCount++
 
           }
         }
@@ -1419,7 +1432,7 @@ const readStudentAnswers = (
 
       if (
         innerCount === 0 ||
-        outerCount === 0
+        backgroundCount === 0
       ) {
         return 0
       }
@@ -1428,49 +1441,45 @@ const readStudentAnswers = (
         innerSum /
         innerCount
 
-      const outerMean =
-        outerSum /
-        outerCount
+      const backgroundMean =
+        backgroundSum /
+        backgroundCount
 
       const darkRatio =
         darkPixels /
         innerCount
 
-      // ===============================================
-      // SELISIH KECERAHAN
-      //
-      // Kalau tengah bubble lebih gelap daripada
-      // kertas di sekitarnya → kemungkinan diisi.
-      // ===============================================
+      // =====================================================
+      // SEBERAPA GELAP TENGAH BUBBLE
+      // =====================================================
 
       const darknessDifference =
         Math.max(
           0,
-          outerMean -
+          backgroundMean -
             innerMean
         )
 
-      // Ubah menjadi nilai 0 - 1
+      // Normalisasi kontras
       const contrastScore =
         Math.min(
           1,
-          darknessDifference /
-            70
+          darknessDifference / 45
         )
 
-      // ===============================================
-      // GABUNGKAN:
+      // =====================================================
+      // SCORE AKHIR
       //
-      // 65% = perbedaan kegelapan
-      // 35% = jumlah pixel gelap
-      // ===============================================
+      // Kontras = 70%
+      // Pixel gelap = 30%
+      // =====================================================
 
       const score =
         (
-          contrastScore * 0.65
+          contrastScore * 0.70
         ) +
         (
-          darkRatio * 0.35
+          darkRatio * 0.30
         )
 
       return score
@@ -1766,8 +1775,8 @@ const readStudentAnswers = (
 
        const emptyThreshold =
         totalQuestions >= 80
-          ? 0.16
-          : 0.14
+          ? 0.22
+          : 0.20
 
         const doubleRatio =
           0.72
