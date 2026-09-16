@@ -2035,20 +2035,6 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       }
     }
 
-    const debugSamples = []
-
-    // di dalam loop setelah inkValues selesai:
-    debugSamples.push({
-      soal: questionNumber,
-      kolom: columnIndex + 1,
-      y: Math.round(row.centerY),
-      ink: inkValues.map(
-        value => Number(value.toFixed(2))
-      ),
-      jawaban:
-        answers[questionNumber]
-    })
-
     // =====================================================
     // 13. HASIL DEBUG
     // =====================================================
@@ -2061,8 +2047,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
         `Track: ${validTracks.length}/${expectedTracks} | ` +
         `Baris: ${rowCountPerColumn.join(" / ")} | ` +
         `Terbaca: ${answeredCount}/${totalQuestions} | ` +
-        `Ganda: ${doubleCount}` +
-        `DEBUG: ${JSON.stringify(debugSamples.slice(0, 10))}`,
+        `Ganda: ${doubleCount}` ,
     }
 
   } catch (error) {
