@@ -1358,110 +1358,170 @@ const readStudentAnswers = (
     // 6. HITUNG TINTA
     // =====================================================
 
-    const calculateInk =
-      (
-        circle
-      ) => {
-        const radius =
-          Math.max(
-            2,
-            circle.r * 0.52
-          )
+    const calculateInk = (circle) => {
+      /*
+      * Kita hanya membaca BAGIAN TENGAH bubble.
+      *
+      * Garis lingkaran berada di luar,
+      * jadi tidak boleh dianggap sebagai tinta.
+      */
 
-        let dark = 0
-        let total = 0
+      const cx = circle.x
+      const cy = circle.y
+      const r = circle.r
 
-        const minX =
-          Math.floor(
-            circle.x -
-              radius
-          )
+      // Beberapa ukuran lingkaran bagian tengah
+      const radii = [
+        r * 0.22,
+        r * 0.28,
+        r * 0.34,
+      ]
 
-        const maxX =
-          Math.ceil(
-            circle.x +
-              radius
-          )
+      const thresholds = [
+        100,
+        120,
+        140,
+        160,
+        180,
+      ]
 
-        const minY =
-          Math.floor(
-            circle.y -
-              radius
-          )
+      const scores = []
 
-        const maxY =
-          Math.ceil(
-            circle.y +
-              radius
-          )
-
+      for (
+        const radius of radii
+      ) {
         for (
-          let y = minY;
-          y <= maxY;
-          y++
+          const threshold of thresholds
         ) {
-          if (
-            y < 0 ||
-            y >= gray.rows
-          ) {
-            continue
-          }
+          let dark = 0
+          let total = 0
+
+          const minX =
+            Math.floor(
+              cx - radius
+            )
+
+          const maxX =
+            Math.ceil(
+              cx + radius
+            )
+
+          const minY =
+            Math.floor(
+              cy - radius
+            )
+
+          const maxY =
+            Math.ceil(
+              cy + radius
+            )
 
           for (
-            let x = minX;
-            x <= maxX;
-            x++
+            let y = minY;
+            y <= maxY;
+            y++
           ) {
             if (
-              x < 0 ||
-              x >= gray.cols
+              y < 0 ||
+              y >= gray.rows
             ) {
               continue
             }
 
-            const dx =
-              x -
-              circle.x
-
-            const dy =
-              y -
-              circle.y
-
-            if (
-              dx * dx +
-                dy * dy >
-              radius *
-                radius
+            for (
+              let x = minX;
+              x <= maxX;
+              x++
             ) {
-              continue
+              if (
+                x < 0 ||
+                x >= gray.cols
+              ) {
+                continue
+              }
+
+              const dx =
+                x - cx
+
+              const dy =
+                y - cy
+
+              if (
+                dx * dx +
+                  dy * dy >
+                radius * radius
+              ) {
+                continue
+              }
+
+              const value =
+                gray.ucharPtr(
+                  y,
+                  x
+                )[0]
+
+              if (
+                value <
+                threshold
+              ) {
+                dark++
+              }
+
+              total++
             }
+          }
 
-            const value =
-              gray.ucharPtr(
-                y,
-                x
-              )[0]
-
-            if (
-              value < 155
-            ) {
-              dark++
-            }
-
-            total++
+          if (
+            total > 0
+          ) {
+            scores.push(
+              dark / total
+            )
           }
         }
+      }
 
-        if (
-          total === 0
-        ) {
-          return 0
-        }
+      if (
+        scores.length === 0
+      ) {
+        return 0
+      }
 
+      /*
+      * Urutkan hasil.
+      *
+      * Kita tidak mengambil nilai terbesar,
+      * karena noise kamera bisa membuat satu
+      * threshold melonjak.
+      *
+      * Ambil nilai tengah (median).
+      */
+
+      scores.sort(
+        (a, b) =>
+          a - b
+      )
+
+      const middle =
+        Math.floor(
+          scores.length / 2
+        )
+
+      if (
+        scores.length % 2 === 0
+      ) {
         return (
-          dark / total
+          (
+            scores[
+              middle - 1
+            ] +
+            scores[middle]
+          ) / 2
         )
       }
+
+      return scores[middle]
+    }
 
     // =====================================================
     // 7. CARI BARIS DALAM SETIAP KOLOM
@@ -1625,6 +1685,39 @@ const readStudentAnswers = (
     // 8. PROSES SEMUA KOLOM
     // =====================================================
 
+    console.log(
+      `🔍 SOAL ${questionNumber}`,
+      {
+        tintaA:
+          Number(
+            inkValues[0].toFixed(3)
+          ),
+
+        tintaB:
+          Number(
+            inkValues[1].toFixed(3)
+          ),
+
+        tintaC:
+          Number(
+            inkValues[2].toFixed(3)
+          ),
+
+        tintaD:
+          Number(
+            inkValues[3].toFixed(3)
+          ),
+
+        tintaE:
+          Number(
+            inkValues[4].toFixed(3)
+          ),
+
+        jawaban:
+          choices[highestIndex],
+      }
+    )
+
     const answers = {}
 
     let questionNumber = 1
@@ -1780,23 +1873,21 @@ const readStudentAnswers = (
           uniqueBubbles
 
         if (
-          answerBubbles.length >
-          5
+          answerBubbles.length > 5
         ) {
           /*
-           * Ambil kelompok 5 bubble
-           * yang paling rapat.
-           */
+          * Cari kelompok 5 bubble yang
+          * jaraknya paling konsisten.
+          */
 
           let bestGroup = null
-          let bestWidth =
+          let bestScore =
             Infinity
 
           for (
             let i = 0;
             i <=
-              answerBubbles.length -
-                5;
+              answerBubbles.length - 5;
             i++
           ) {
             const group =
@@ -1805,16 +1896,51 @@ const readStudentAnswers = (
                 i + 5
               )
 
-            const width =
-              group[4].x -
-              group[0].x
+            const gaps = []
+
+            for (
+              let j = 1;
+              j < group.length;
+              j++
+            ) {
+              gaps.push(
+                group[j].x -
+                  group[j - 1].x
+              )
+            }
+
+            const averageGap =
+              gaps.reduce(
+                (sum, value) =>
+                  sum + value,
+                0
+              ) /
+              gaps.length
+
+            const variance =
+              gaps.reduce(
+                (sum, value) =>
+                  sum +
+                  Math.pow(
+                    value -
+                      averageGap,
+                    2
+                  ),
+                0
+              ) /
+              gaps.length
+
+            /*
+            * Semakin kecil variance,
+            * semakin rapi susunan bubble.
+            */
 
             if (
-              width <
-              bestWidth
+              variance <
+              bestScore
             ) {
-              bestWidth =
-                width
+              bestScore =
+                variance
 
               bestGroup =
                 group
