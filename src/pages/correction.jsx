@@ -1086,11 +1086,11 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       circles,
       cv.HOUGH_GRADIENT,
       1,
-      10,
-      100,
-      18,
-      5,
-      20
+      8,
+      90,
+      15,
+      4,
+      22
     )
 
     const rawCircles = []
@@ -1136,8 +1136,8 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       // -----------------------------------------------
 
       if (
-        r < 5 ||
-        r > 20
+        r < 4 ||
+        r > 22
       ) {
         continue
       }
