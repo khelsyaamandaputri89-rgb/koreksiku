@@ -1359,25 +1359,17 @@ const readStudentAnswers = (
     // =====================================================
 
     const calculateInk = (circle) => {
-      /*
-      * Kita hanya membaca BAGIAN TENGAH bubble.
-      *
-      * Garis lingkaran berada di luar,
-      * jadi tidak boleh dianggap sebagai tinta.
-      */
+      const centerX = circle.x
+      const centerY = circle.y
+      const radius = circle.r
 
-      const cx = circle.x
-      const cy = circle.y
-      const r = circle.r
-
-      // Beberapa ukuran lingkaran bagian tengah
-      const radii = [
-        r * 0.22,
-        r * 0.28,
-        r * 0.34,
+      const testRadii = [
+        radius * 0.22,
+        radius * 0.28,
+        radius * 0.34,
       ]
 
-      const thresholds = [
+      const testThresholds = [
         100,
         120,
         140,
@@ -1388,94 +1380,96 @@ const readStudentAnswers = (
       const scores = []
 
       for (
-        const radius of radii
+        const testRadius of testRadii
       ) {
         for (
-          const threshold of thresholds
+          const threshold of testThresholds
         ) {
-          let dark = 0
-          let total = 0
+          let darkPixelCount = 0
+          let totalPixelCount = 0
 
-          const minX =
+          const startX =
             Math.floor(
-              cx - radius
+              centerX - testRadius
             )
 
-          const maxX =
+          const endX =
             Math.ceil(
-              cx + radius
+              centerX + testRadius
             )
 
-          const minY =
+          const startY =
             Math.floor(
-              cy - radius
+              centerY - testRadius
             )
 
-          const maxY =
+          const endY =
             Math.ceil(
-              cy + radius
+              centerY + testRadius
             )
 
           for (
-            let y = minY;
-            y <= maxY;
-            y++
+            let pixelY = startY;
+            pixelY <= endY;
+            pixelY++
           ) {
             if (
-              y < 0 ||
-              y >= gray.rows
+              pixelY < 0 ||
+              pixelY >= gray.rows
             ) {
               continue
             }
 
             for (
-              let x = minX;
-              x <= maxX;
-              x++
+              let pixelX = startX;
+              pixelX <= endX;
+              pixelX++
             ) {
               if (
-                x < 0 ||
-                x >= gray.cols
+                pixelX < 0 ||
+                pixelX >= gray.cols
               ) {
                 continue
               }
 
               const dx =
-                x - cx
+                pixelX - centerX
 
               const dy =
-                y - cy
+                pixelY - centerY
 
               if (
                 dx * dx +
                   dy * dy >
-                radius * radius
+                testRadius *
+                  testRadius
               ) {
                 continue
               }
 
-              const value =
+              const grayValue =
                 gray.ucharPtr(
-                  y,
-                  x
+                  pixelY,
+                  pixelX
                 )[0]
 
               if (
-                value <
+                grayValue <
                 threshold
               ) {
-                dark++
+                darkPixelCount++
               }
 
-              total++
+              totalPixelCount++
             }
           }
 
           if (
-            total > 0
+            totalPixelCount > 0
           ) {
             scores.push(
-              dark / total
+              darkPixelCount /
+                totalPixelCount
             )
           }
         }
@@ -1487,22 +1481,12 @@ const readStudentAnswers = (
         return 0
       }
 
-      /*
-      * Urutkan hasil.
-      *
-      * Kita tidak mengambil nilai terbesar,
-      * karena noise kamera bisa membuat satu
-      * threshold melonjak.
-      *
-      * Ambil nilai tengah (median).
-      */
-
       scores.sort(
         (a, b) =>
           a - b
       )
 
-      const middle =
+      const middleIndex =
         Math.floor(
           scores.length / 2
         )
@@ -1513,14 +1497,18 @@ const readStudentAnswers = (
         return (
           (
             scores[
-              middle - 1
+              middleIndex - 1
             ] +
-            scores[middle]
+            scores[
+              middleIndex
+            ]
           ) / 2
         )
       }
 
-      return scores[middle]
+      return scores[
+        middleIndex
+      ]
     }
 
     // =====================================================
