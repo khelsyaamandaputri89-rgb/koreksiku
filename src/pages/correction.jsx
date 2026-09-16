@@ -1020,7 +1020,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
   if (!window.cv || !window.cv.Mat) {
     return {
       answers: {},
-      debug: "OpenCV belum siap.",
+      debug: "❌ OpenCV belum siap.",
     }
   }
 
@@ -1033,7 +1033,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
 
   try {
     // =====================================================
-    // 1. BACA CANVAS HASIL WARP
+    // 1. BACA HASIL WARP
     // =====================================================
 
     src = cv.imread(canvas)
@@ -1056,16 +1056,11 @@ const readStudentAnswers = (canvas, totalQuestions) => {
     )
 
     // =====================================================
-    // 2. KONFIGURASI LAYOUT
+    // 2. KONFIGURASI
     // =====================================================
 
     const columnCount =
       totalQuestions >= 80 ? 3 : 2
-
-    const questionsPerColumn =
-      Math.ceil(
-        totalQuestions / columnCount
-      )
 
     const choices = [
       "A",
@@ -1075,8 +1070,13 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       "E",
     ]
 
+    const questionsPerColumn =
+      Math.ceil(
+        totalQuestions / columnCount
+      )
+
     // =====================================================
-    // 3. DETEKSI SEMUA LINGKARAN
+    // 3. DETEKSI SEMUA BUBBLE
     // =====================================================
 
     circles = new cv.Mat()
@@ -1086,7 +1086,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       circles,
       cv.HOUGH_GRADIENT,
       1,
-      8,
+      7,
       90,
       15,
       4,
@@ -1109,32 +1109,23 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       const r =
         circles.data32F[i * 3 + 2]
 
-      // -----------------------------------------------
       // Buang header
-      // -----------------------------------------------
-
       if (
         y <
-        canvas.height * 0.18
+        canvas.height * 0.16
       ) {
         continue
       }
 
-      // -----------------------------------------------
-      // Buang bagian essay / bawah
-      // -----------------------------------------------
-
+      // Buang bagian bawah/essay
       if (
         y >
-        canvas.height * 0.78
+        canvas.height * 0.82
       ) {
         continue
       }
 
-      // -----------------------------------------------
       // Radius bubble
-      // -----------------------------------------------
-
       if (
         r < 4 ||
         r > 22
@@ -1150,7 +1141,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
     }
 
     // =====================================================
-    // 4. HAPUS LINGKARAN DUPLIKAT
+    // 4. HAPUS DUPLIKAT
     // =====================================================
 
     rawCircles.sort(
@@ -1183,10 +1174,10 @@ const readStudentAnswers = (canvas, totalQuestions) => {
 
         if (
           distance <
-          Math.max(
+          Math.min(
             circle.r,
             existing.r
-          ) * 0.80
+          ) * 0.75
         ) {
           duplicate = true
           break
@@ -1206,78 +1197,204 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       return {
         answers: {},
         debug:
-          `❌ Lingkaran terlalu sedikit: ${detectedCircles.length}`,
+          `❌ Bubble terlalu sedikit: ${detectedCircles.length}`,
       }
     }
 
     // =====================================================
-    // 5. KELOMPOKKAN X MENJADI TRACK
+    // 5. HITUNG TINTA
     // =====================================================
+    //
+    // Yang diperiksa hanya bagian TENGAH bubble.
+    // Garis lingkaran luar tidak dihitung sebagai tinta.
+    //
 
-    const sortedX =
+    const calculateInk = (
+      circle
+    ) => {
+      const radius =
+        Math.max(
+          2,
+          circle.r * 0.50
+        )
+
+      let darkPixels = 0
+      let totalPixels = 0
+
+      const minX =
+        Math.floor(
+          circle.x - radius
+        )
+
+      const maxX =
+        Math.ceil(
+          circle.x + radius
+        )
+
+      const minY =
+        Math.floor(
+          circle.y - radius
+        )
+
+      const maxY =
+        Math.ceil(
+          circle.y + radius
+        )
+
+      for (
+        let y = minY;
+        y <= maxY;
+        y++
+      ) {
+        if (
+          y < 0 ||
+          y >= gray.rows
+        ) {
+          continue
+        }
+
+        for (
+          let x = minX;
+          x <= maxX;
+          x++
+        ) {
+          if (
+            x < 0 ||
+            x >= gray.cols
+          ) {
+            continue
+          }
+
+          const dx =
+            x - circle.x
+
+          const dy =
+            y - circle.y
+
+          if (
+            dx * dx +
+              dy * dy >
+            radius * radius
+          ) {
+            continue
+          }
+
+          const value =
+            gray.ucharPtr(
+              y,
+              x
+            )[0]
+
+          if (
+            value < 145
+          ) {
+            darkPixels++
+          }
+
+          totalPixels++
+        }
+      }
+
+      if (
+        totalPixels === 0
+      ) {
+        return 0
+      }
+
+      return (
+        darkPixels /
+        totalPixels
+      )
+    }
+
+    // =====================================================
+    // 6. KELOMPOKKAN BUBBLE BERDASARKAN BARIS
+    // =====================================================
+    //
+    // PENTING:
+    // Kita TIDAK menentukan posisi A-E.
+    //
+    // Kita hanya mencari bubble yang Y-nya berdekatan.
+    //
+    // Jadi konsepnya:
+    //
+    //    ○  ○  ●  ○  ○
+    //    ──────────────
+    //         SATU BARIS
+    //
+    // Yang tintanya paling tebal = jawaban.
+    //
+
+    const sortedByY =
       [...detectedCircles].sort(
         (a, b) =>
-          a.x - b.x
+          a.y - b.y
       )
 
-    const xGaps = []
+    // Cari perkiraan jarak baris
+    const yGaps = []
 
     for (
       let i = 1;
-      i < sortedX.length;
+      i < sortedByY.length;
       i++
     ) {
       const gap =
-        sortedX[i].x -
-        sortedX[i - 1].x
+        sortedByY[i].y -
+        sortedByY[i - 1].y
 
       if (
-        gap > 5 &&
+        gap > 8 &&
         gap <
-          canvas.width * 0.08
+          canvas.height * 0.035
       ) {
-        xGaps.push(gap)
+        yGaps.push(gap)
       }
     }
 
-    xGaps.sort(
+    yGaps.sort(
       (a, b) => a - b
     )
 
-    const medianXGap =
-      xGaps.length > 0
-        ? xGaps[
+    const rowGap =
+      yGaps.length > 0
+        ? yGaps[
             Math.floor(
-              xGaps.length / 2
+              yGaps.length / 2
             )
           ]
-        : 30
+        : 25
 
-    const xTolerance =
+    /*
+     * Toleransi cukup lebar supaya
+     * LJK yang sedikit miring tetap
+     * dianggap satu baris.
+     */
+    const rowTolerance =
       Math.max(
         7,
         Math.min(
-          medianXGap * 0.45,
-          15
+          rowGap * 0.60,
+          16
         )
       )
 
-    const xTracks = []
+    const rowClusters = []
 
     for (
-      const circle of sortedX
+      const circle of sortedByY
     ) {
-      let nearest = null
+      let nearestRow = null
       let nearestDistance =
         Infinity
 
       for (
-        const track of xTracks
+        const row of rowClusters
       ) {
         const distance =
           Math.abs(
-            circle.x -
-            track.centerX
+            circle.y -
+            row.centerY
           )
 
         if (
@@ -1287,517 +1404,155 @@ const readStudentAnswers = (canvas, totalQuestions) => {
           nearestDistance =
             distance
 
-          nearest = track
+          nearestRow = row
         }
       }
 
       if (
-        nearest &&
+        nearestRow &&
         nearestDistance <=
-          xTolerance
+          rowTolerance
       ) {
-        nearest.points.push(
+        nearestRow.circles.push(
           circle
         )
 
-        nearest.centerX =
-          nearest.points.reduce(
-            (sum, p) =>
-              sum + p.x,
+        nearestRow.centerY =
+          nearestRow.circles.reduce(
+            (sum, item) =>
+              sum + item.y,
             0
           ) /
-          nearest.points.length
+          nearestRow.circles.length
       } else {
-        xTracks.push({
-          centerX: circle.x,
-          points: [circle],
+        rowClusters.push({
+          centerY: circle.y,
+          circles: [circle],
         })
       }
     }
 
     // =====================================================
-    // 6. PILIH TRACK YANG BENAR-BENAR PANJANG
+    // 7. BUANG BARIS YANG BUKAN BARIS PILIHAN GANDA
     // =====================================================
+    //
+    // Satu baris soal normalnya memiliki
+    // beberapa bubble.
+    //
+    // Karena kamera kadang tidak menangkap
+    // semua bubble, minimal 3 bubble masih
+    // dianggap valid.
+    //
 
-    const expectedTracks =
-      columnCount * 5
-
-    const minimumTrackPoints =
-      Math.max(
-        8,
-        Math.floor(
-          questionsPerColumn *
-            0.30
+    const validRows =
+      rowClusters
+        .filter(
+          row =>
+            row.circles.length >= 3
         )
-      )
-
-    let validTracks =
-      xTracks.filter(
-        track =>
-          track.points.length >=
-          minimumTrackPoints
-      )
-
-    validTracks.sort(
-      (a, b) =>
-        a.centerX -
-        b.centerX
-    )
-
-    // Kalau terlalu banyak track,
-    // ambil track dengan titik terbanyak
-    if (
-      validTracks.length >
-      expectedTracks
-    ) {
-      validTracks =
-        [...validTracks]
-          .sort(
-            (a, b) =>
-              b.points.length -
-              a.points.length
-          )
-          .slice(
-            0,
-            expectedTracks
-          )
-          .sort(
-            (a, b) =>
-              a.centerX -
-              b.centerX
-          )
-    }
-
-    if (
-      validTracks.length <
-      expectedTracks
-    ) {
-      return {
-        answers: {},
-        debug:
-          `❌ Track tidak lengkap: ${validTracks.length}/${expectedTracks} | Circle: ${detectedCircles.length}`,
-      }
-    }
-
-    // =====================================================
-    // 7. BAGI MENJADI KOLOM
-    // =====================================================
-
-    const columns = []
-
-    for (
-      let c = 0;
-      c < columnCount;
-      c++
-    ) {
-      const column =
-        validTracks
-          .slice(
-            c * 5,
-            c * 5 + 5
-          )
-          .map(
-            track => ({
-              ...track,
-
-              points:
-                [...track.points]
-                  .sort(
-                    (a, b) =>
-                      a.y - b.y
-                  ),
-            })
-          )
-
-      columns.push(
-        column
-      )
-    }
-
-    // =====================================================
-    // 8. HITUNG TINTA DI TENGAH BUBBLE
-    // =====================================================
-
-    const calculateInk =
-      (
-        centerX,
-        centerY,
-        radius
-      ) => {
-        /*
-         * Hanya bagian tengah bubble.
-         *
-         * Ini penting supaya garis lingkaran
-         * yang tercetak tidak dianggap sebagai tinta.
-         */
-
-        const innerRadius =
-          Math.max(
-            2.5,
-            radius * 0.52
-          )
-
-        let darkPixels = 0
-        let totalPixels = 0
-
-        const minX =
-          Math.floor(
-            centerX -
-              innerRadius
-          )
-
-        const maxX =
-          Math.ceil(
-            centerX +
-              innerRadius
-          )
-
-        const minY =
-          Math.floor(
-            centerY -
-              innerRadius
-          )
-
-        const maxY =
-          Math.ceil(
-            centerY +
-              innerRadius
-          )
-
-        for (
-          let y = minY;
-          y <= maxY;
-          y++
-        ) {
-          if (
-            y < 0 ||
-            y >= gray.rows
-          ) {
-            continue
-          }
-
-          for (
-            let x = minX;
-            x <= maxX;
-            x++
-          ) {
-            if (
-              x < 0 ||
-              x >= gray.cols
-            ) {
-              continue
-            }
-
-            const dx =
-              x - centerX
-
-            const dy =
-              y - centerY
-
-            if (
-              dx * dx +
-                dy * dy >
-              innerRadius *
-                innerRadius
-            ) {
-              continue
-            }
-
-            const value =
-              gray.ucharPtr(
-                y,
-                x
-              )[0]
-
-            /*
-             * 150 lebih aman untuk kamera HP
-             * dibanding 110.
-             */
-            if (
-              value < 150
-            ) {
-              darkPixels++
-            }
-
-            totalPixels++
-          }
-        }
-
-        if (
-          totalPixels === 0
-        ) {
-          return 0
-        }
-
-        return (
-          darkPixels /
-          totalPixels
-        )
-      }
-
-    // =====================================================
-    // 9. CARI JARAK ANTAR BARIS
-    // =====================================================
-
-    const estimateRowGap =
-      column => {
-        const gaps = []
-
-        for (
-          const track of column
-        ) {
-          const points =
-            [...track.points].sort(
-              (a, b) =>
-                a.y - b.y
-            )
-
-          for (
-            let i = 1;
-            i < points.length;
-            i++
-          ) {
-            const gap =
-              points[i].y -
-              points[i - 1].y
-
-            /*
-             * Abaikan gap terlalu kecil
-             * dan terlalu besar.
-             */
-            if (
-              gap > 10 &&
-              gap <
-                canvas.height *
-                  0.04
-            ) {
-              gaps.push(gap)
-            }
-          }
-        }
-
-        if (
-          gaps.length === 0
-        ) {
-          return 25
-        }
-
-        gaps.sort(
-          (a, b) => a - b
-        )
-
-        return gaps[
-          Math.floor(
-            gaps.length / 2
-          )
-        ]
-      }
-
-    // =====================================================
-    // 10. CARI BARIS DENGAN KONSENSUS 5 TRACK
-    // =====================================================
-
-    const getRows =
-      (
-        column,
-        expectedRows
-      ) => {
-        const rowGap =
-          estimateRowGap(
-            column
-          )
-
-        /*
-         * Ambil semua Y.
-         */
-        const allPoints = []
-
-        column.forEach(
-          track => {
-            track.points.forEach(
-              point => {
-                allPoints.push(
-                  point
-                )
-              }
-            )
-          }
-        )
-
-        allPoints.sort(
-          (a, b) =>
-            a.y - b.y
-        )
-
-        const tolerance =
-          Math.max(
-            5,
-            Math.min(
-              rowGap * 0.35,
-              9
-            )
-          )
-
-        const clusters = []
-
-        for (
-          const point of allPoints
-        ) {
-          let nearest = null
-          let distance =
-            Infinity
-
-          for (
-            const cluster of clusters
-          ) {
-            const d =
-              Math.abs(
-                point.y -
-                cluster.centerY
-              )
-
-            if (
-              d < distance
-            ) {
-              distance = d
-              nearest = cluster
-            }
-          }
-
-          if (
-            nearest &&
-            distance <=
-              tolerance
-          ) {
-            nearest.points.push(
-              point
-            )
-
-            nearest.centerY =
-              nearest.points.reduce(
-                (sum, p) =>
-                  sum + p.y,
-                0
-              ) /
-              nearest.points.length
-          } else {
-            clusters.push({
-              centerY: point.y,
-              points: [point],
-            })
-          }
-        }
-
-        /*
-         * Setiap baris yang benar harus
-         * memiliki bubble dari minimal
-         * 3 track berbeda.
-         */
-        const strongRows =
-          []
-
-        for (
-          const cluster of clusters
-        ) {
-          const trackIndexes =
-            new Set()
-
-          for (
-            const point of
-              cluster.points
-          ) {
-            let nearestTrack =
-              -1
-
-            let nearestDistance =
-              Infinity
-
-            for (
-              let i = 0;
-              i < column.length;
-              i++
-            ) {
-              const d =
-                Math.abs(
-                  point.x -
-                  column[i]
-                    .centerX
-                )
-
-              if (
-                d <
-                nearestDistance
-              ) {
-                nearestDistance =
-                  d
-
-                nearestTrack =
-                  i
-              }
-            }
-
-            if (
-              nearestTrack >=
-              0
-            ) {
-              trackIndexes.add(
-                nearestTrack
-              )
-            }
-          }
-
-          if (
-            trackIndexes.size >=
-            3
-          ) {
-            strongRows.push(
-              {
-                centerY:
-                  cluster.centerY,
-                points:
-                  cluster.points,
-              }
-            )
-          }
-        }
-
-        strongRows.sort(
+        .sort(
           (a, b) =>
             a.centerY -
             b.centerY
         )
 
-        /*
-         * Kalau lebih banyak,
-         * ambil yang paling sesuai
-         * dengan jumlah soal.
-         */
-        if (
-          strongRows.length >
-          expectedRows
-        ) {
-          return strongRows
-            .sort(
-              (a, b) =>
-                b.points.length -
-                a.points.length
-            )
-            .slice(
-              0,
-              expectedRows
-            )
-            .sort(
-              (a, b) =>
-                a.centerY -
-                b.centerY
-            )
-        }
+    // =====================================================
+    // 8. BAGI BARIS BERDASARKAN KOLOM
+    // =====================================================
+    //
+    // Untuk layout 2/3 kolom, kita menggunakan
+    // posisi X hanya untuk memisahkan kolom.
+    //
+    // BUKAN untuk menentukan A/B/C/D/E.
+    //
 
-        return strongRows
+    const sortedRows =
+      [...validRows].sort(
+        (a, b) =>
+          a.centerY -
+          b.centerY
+      )
+
+    /*
+     * Kelompokkan baris menjadi kolom
+     * berdasarkan posisi X rata-rata.
+     */
+
+    const rowsWithX =
+      sortedRows.map(
+        row => {
+          const averageX =
+            row.circles.reduce(
+              (sum, circle) =>
+                sum + circle.x,
+              0
+            ) /
+            row.circles.length
+
+          return {
+            ...row,
+            averageX,
+          }
+        }
+      )
+
+    const columnWidth =
+      canvas.width /
+      columnCount
+
+    const columnRows =
+      Array.from(
+        {
+          length:
+            columnCount,
+        },
+        () => []
+      )
+
+    for (
+      const row of rowsWithX
+    ) {
+      let columnIndex =
+        Math.floor(
+          row.averageX /
+            columnWidth
+        )
+
+      if (
+        columnIndex < 0
+      ) {
+        columnIndex = 0
       }
 
+      if (
+        columnIndex >=
+        columnCount
+      ) {
+        columnIndex =
+          columnCount - 1
+      }
+
+      columnRows[
+        columnIndex
+      ].push(row)
+    }
+
     // =====================================================
-    // 11. PROSES SEMUA KOLOM
+    // 9. SORT BARIS DALAM SETIAP KOLOM
+    // =====================================================
+
+    columnRows.forEach(
+      rows => {
+        rows.sort(
+          (a, b) =>
+            a.centerY -
+            b.centerY
+        )
+      }
+    )
+
+    // =====================================================
+    // 10. BACA TINTA SETIAP BARIS
     // =====================================================
 
     const answers = {}
@@ -1806,15 +1561,23 @@ const readStudentAnswers = (canvas, totalQuestions) => {
     let answeredCount = 0
     let doubleCount = 0
 
-    const rowCountPerColumn = []
+    const debugRows = []
 
     for (
       let columnIndex = 0;
-      columnIndex < columnCount;
+      columnIndex <
+      columnCount;
       columnIndex++
     ) {
-      const column =
-        columns[columnIndex]
+      const rows =
+        columnRows[
+          columnIndex
+        ]
+
+      /*
+       * Jumlah soal yang seharusnya
+       * ada pada kolom ini.
+       */
 
       const startQuestion =
         columnIndex *
@@ -1830,23 +1593,45 @@ const readStudentAnswers = (canvas, totalQuestions) => {
           remaining
         )
 
-      const rows =
-        getRows(
-          column,
-          expectedRows
-        )
+      /*
+       * Kalau deteksi menghasilkan
+       * terlalu banyak baris, pilih
+       * baris yang paling kuat.
+       */
 
-      rowCountPerColumn.push(
-        rows.length
-      )
+      let selectedRows =
+        rows
+
+      if (
+        rows.length >
+        expectedRows
+      ) {
+        selectedRows =
+          [...rows]
+            .sort(
+              (a, b) =>
+                b.circles.length -
+                a.circles.length
+            )
+            .slice(
+              0,
+              expectedRows
+            )
+            .sort(
+              (a, b) =>
+                a.centerY -
+                b.centerY
+            )
+      }
 
       // ===================================================
-      // 12. BACA SETIAP BARIS
+      // BACA SETIAP BARIS
       // ===================================================
 
       for (
         let rowIndex = 0;
-        rowIndex < rows.length;
+        rowIndex <
+          selectedRows.length;
         rowIndex++
       ) {
         if (
@@ -1857,95 +1642,132 @@ const readStudentAnswers = (canvas, totalQuestions) => {
         }
 
         const row =
-          rows[rowIndex]
+          selectedRows[
+            rowIndex
+          ]
 
-        const inkValues = []
+        /*
+         * Urutkan bubble berdasarkan X.
+         *
+         * Ini HANYA untuk mengetahui
+         * urutan kiri → kanan.
+         *
+         * Tidak menggunakan ukuran
+         * jarak untuk menentukan jawaban.
+         */
 
-        // -----------------------------------------------
-        // Cari bubble A-E
-        // -----------------------------------------------
+        const rowCircles =
+          [...row.circles]
+            .sort(
+              (a, b) =>
+                a.x - b.x
+            )
+
+        // ===============================================
+        // Ambil maksimal 5 bubble
+        // ===============================================
+
+        /*
+         * Kalau Hough mendeteksi lebih dari
+         * 5 bubble pada baris karena duplikat/
+         * noise, kita bersihkan berdasarkan
+         * posisi X.
+         */
+
+        const uniqueRowCircles = []
 
         for (
-          let choiceIndex = 0;
-          choiceIndex < 5;
-          choiceIndex++
+          const circle of rowCircles
         ) {
-          const track =
-            column[choiceIndex]
-
-          if (!track) {
-            inkValues.push(0)
-            continue
-          }
-
-          let nearest = null
-          let nearestDistance =
-            Infinity
-
-          for (
-            const point of
-              track.points
-          ) {
-            const distance =
-              Math.abs(
-                point.y -
-                row.centerY
-              )
-
-            if (
-              distance <
-              nearestDistance
-            ) {
-              nearestDistance =
-                distance
-
-              nearest = point
-            }
-          }
-
-          /*
-           * Jangan mengambil bubble
-           * dari baris sebelah.
-           */
-          const maxDistance =
-            Math.max(
-              6,
-              Math.min(
-                estimateRowGap(
-                  column
-                ) * 0.38,
-                10
-              )
+          const alreadyClose =
+            uniqueRowCircles.some(
+              existing =>
+                Math.abs(
+                  existing.x -
+                  circle.x
+                ) <
+                Math.max(
+                  existing.r,
+                  circle.r
+                ) *
+                  1.2
             )
 
           if (
-            nearest &&
-            nearestDistance <=
-              maxDistance
+            !alreadyClose
           ) {
-            const ink =
-              calculateInk(
-                nearest.x,
-                nearest.y,
-                nearest.r
-              )
-
-            inkValues.push(
-              ink
+            uniqueRowCircles.push(
+              circle
             )
-          } else {
-            inkValues.push(0)
           }
         }
 
-        // =================================================
-        // 13. CARI TINTA TERTEBAL
-        // =================================================
+        /*
+         * Kalau lebih dari 5,
+         * pilih 5 bubble yang paling
+         * masuk akal berdasarkan posisi.
+         */
 
-        const sorted =
+        let bubbles =
+          uniqueRowCircles
+
+        if (
+          bubbles.length >
+          5
+        ) {
+          bubbles =
+            [...bubbles]
+              .sort(
+                (a, b) =>
+                  a.x - b.x
+              )
+              .slice(
+                0,
+                5
+              )
+        }
+
+        // ===============================================
+        // HITUNG TINTA
+        // ===============================================
+
+        const inkValues =
+          bubbles.map(
+            bubble =>
+              calculateInk(
+                bubble
+              )
+          )
+
+        // ===============================================
+        // PASTIKAN ADA 5 POSISI
+        // ===============================================
+
+        /*
+         * Tidak memakai jarak tetap.
+         *
+         * Posisi yang ada langsung
+         * dibaca dari bubble yang ditemukan.
+         */
+
+        while (
+          inkValues.length <
+          5
+        ) {
+          inkValues.push(0)
+        }
+
+        // ===============================================
+        // CARI TINTA PALING TEBAL
+        // ===============================================
+
+        const sortedInk =
           inkValues
             .map(
-              (value, index) => ({
+              (
+                value,
+                index
+              ) => ({
                 value,
                 index,
               })
@@ -1957,127 +1779,74 @@ const readStudentAnswers = (canvas, totalQuestions) => {
             )
 
         const highest =
-          sorted[0]?.value || 0
+          sortedInk[0]
+            ?.value || 0
 
         const second =
-          sorted[1]?.value || 0
+          sortedInk[1]
+            ?.value || 0
 
         const highestIndex =
-          sorted[0]?.index ?? -1
+          sortedInk[0]
+            ?.index ?? -1
 
-        // =================================================
-        // 14. HITUNG RATA-RATA BUBBLE LAIN
-        // =================================================
+        // ===============================================
+        // CEK TINTA
+        // ===============================================
 
-        let otherSum = 0
-
-        for (
-          let i = 0;
-          i < inkValues.length;
-          i++
-        ) {
-          if (
-            i !==
-            highestIndex
-          ) {
-            otherSum +=
-              inkValues[i]
-          }
-        }
-
-        const averageOthers =
-          otherSum / 4
+        const minimumInk =
+          0.08
 
         const difference =
           highest -
-          averageOthers
-
-        // =================================================
-        // 15. NORMALISASI TINTA
-        // =================================================
+          second
 
         /*
-         * Bubble kosong biasanya memiliki
-         * tinta tengah sangat kecil.
-         *
-         * Bubble yang benar-benar dihitamkan
-         * akan jauh lebih tinggi.
+         * Jika dua bubble sama-sama
+         * sangat hitam → kemungkinan
+         * jawaban ganda.
          */
 
-        const minimumInk =
-          0.10
-
-        const minimumDifference =
-          0.035
-
-        /*
-         * Jika pilihan kedua mendekati
-         * pilihan pertama → kemungkinan ganda.
-         */
         const doubleRatio =
           0.88
 
-        // =================================================
-        // 16. TENTUKAN JAWABAN
-        // =================================================
+        let answer = ""
 
         if (
-          highestIndex < 0 ||
-          highest <
-            minimumInk ||
-          difference <
-            minimumDifference
+          highestIndex >= 0 &&
+          highest >=
+            minimumInk
         ) {
-          answers[
-            questionNumber
-          ] = ""
-        } else if (
-          second >=
-          highest *
-            doubleRatio
-        ) {
-          answers[
-            questionNumber
-          ] = ""
+          if (
+            second >=
+            highest *
+              doubleRatio
+          ) {
+            answer = ""
+            doubleCount++
+          } else {
+            answer =
+              choices[
+                highestIndex
+              ]
 
-          doubleCount++
-        } else {
-          answers[
-            questionNumber
-          ] =
-            choices[
-              highestIndex
-            ]
-
-          answeredCount++
+            answeredCount++
+          }
         }
 
-        // =================================================
-        // DEBUG
-        // =================================================
+        answers[
+          questionNumber
+        ] = answer
 
-        console.log(
-          `SOAL ${questionNumber}`,
-          {
-            column:
-              columnIndex + 1,
-
-            row:
-              rowIndex + 1,
-
-            ink:
-              inkValues.map(
-                value =>
-                  Number(
-                    value.toFixed(3)
-                  )
-              ),
-
-            jawaban:
-              answers[
-                questionNumber
-              ],
-          }
+        debugRows.push(
+          `S${questionNumber}: ${inkValues
+            .map(
+              value =>
+                value.toFixed(2)
+            )
+            .join("/")} → ${
+            answer || "-"
+          }`
         )
 
         questionNumber++
@@ -2085,18 +1854,23 @@ const readStudentAnswers = (canvas, totalQuestions) => {
     }
 
     // =====================================================
-    // 17. HASIL DEBUG
+    // 11. DEBUG
     // =====================================================
+
+    const rowCounts =
+      columnRows.map(
+        rows =>
+          rows.length
+      )
 
     return {
       answers,
 
       debug:
-        `🔎 Lingkaran: ${detectedCircles.length} | ` +
-        `Track: ${validTracks.length}/${expectedTracks} | ` +
-        `Baris: ${rowCountPerColumn.join("/")}` +
-        ` | Baca: ${answeredCount}/${totalQuestions}` +
-        ` | Ganda: ${doubleCount}`,
+        `🔎 Bubble: ${detectedCircles.length} | ` +
+        `Baris: ${rowCounts.join("/")} | ` +
+        `Baca: ${answeredCount}/${totalQuestions} | ` +
+        `Ganda: ${doubleCount}`,
     }
 
   } catch (error) {
