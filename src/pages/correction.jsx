@@ -1393,7 +1393,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
       const innerRadius =
         Math.max(
           3,
-          radius * 0.45
+          radius * 0.55
         )
 
       let darkPixels = 0
@@ -1401,26 +1401,22 @@ const readStudentAnswers = (canvas, totalQuestions) => {
 
       const minX =
         Math.floor(
-          centerX -
-            innerRadius
+          centerX - innerRadius
         )
 
       const maxX =
         Math.ceil(
-          centerX +
-            innerRadius
+          centerX + innerRadius
         )
 
       const minY =
         Math.floor(
-          centerY -
-            innerRadius
+          centerY - innerRadius
         )
 
       const maxY =
         Math.ceil(
-          centerY +
-            innerRadius
+          centerY + innerRadius
         )
 
       for (
@@ -1468,8 +1464,11 @@ const readStudentAnswers = (canvas, totalQuestions) => {
               x
             )[0]
 
+          /*
+          * Hitam pekat.
+          */
           if (
-            value < 130
+            value < 110
           ) {
             darkPixels++
           }
@@ -1931,21 +1930,64 @@ const readStudentAnswers = (canvas, totalQuestions) => {
         // THRESHOLD
         // ===============================================
 
-        const emptyThreshold =
-          totalQuestions >= 80
-            ? 0.18
-            : 0.16
+        // =====================================================
+// ANALISIS TINTA
+// =====================================================
 
+        /*
+        * Kita tidak hanya melihat nilai tertinggi.
+        *
+        * Kita lihat seberapa jauh nilai tertinggi
+        * dibandingkan tinta rata-rata pilihan lainnya.
+        */
+
+        const averageOthers =
+          inkValues
+            .filter(
+              (_, index) =>
+                index !==
+                highestIndex
+            )
+            .reduce(
+              (sum, value) =>
+                sum + value,
+              0
+            ) / 4
+
+        const difference =
+          highest -
+          averageOthers
+
+        /*
+        * Jika semua bubble relatif sama,
+        * berarti tidak ada jawaban.
+        *
+        * Jika satu bubble jauh lebih hitam,
+        * berarti itulah jawaban siswa.
+        */
+        const minimumInk =
+          0.08
+
+        const minimumDifference =
+          0.045
+
+        /*
+        * Cek apakah dua pilihan sama-sama
+        * dihitamkan.
+        */
         const doubleRatio =
-          0.72
+          0.78
 
         if (
           highest <
-          emptyThreshold
+            minimumInk ||
+          difference <
+            minimumDifference
         ) {
           answers[
             questionNumber
           ] = ""
+
         } else if (
           second >=
           highest *
@@ -1956,6 +1998,7 @@ const readStudentAnswers = (canvas, totalQuestions) => {
           ] = ""
 
           doubleCount++
+
         } else {
           answers[
             questionNumber
