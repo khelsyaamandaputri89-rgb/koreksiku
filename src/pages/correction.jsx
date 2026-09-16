@@ -1373,6 +1373,18 @@ const readStudentAnswers = (
     // KELOMPOKKAN BUBBLE BERDASARKAN KOLOM
     // =====================================================
 
+    // =====================================================
+    // KELOMPOKKAN BUBBLE MENJADI 15 JALUR
+    //
+    // TIDAK MENGGUNAKAN JARAK TETAP.
+    //
+    // Kita hanya menggunakan posisi X bubble
+    // yang benar-benar ditemukan oleh kamera.
+    //
+    // 100 soal = 3 kolom
+    // 3 kolom × 5 pilihan = 15 jalur
+    // =====================================================
+
     const sortedBubbles =
       [...bubbles].sort(
         (
@@ -1383,18 +1395,228 @@ const readStudentAnswers = (
           secondBubble.centerX
       )
 
-    /*
-     * Cari kelompok X.
-     *
-     * Setiap kolom mempunyai 5 jalur:
-     *
-     * A B C D E
-     */
+    const expectedTrackCount =
+      columnCount * 5
 
-    const xClusters = []
+    // =====================================================
+    // AMBIL TITIK X UNTUK SETIAP BUBBLE
+    // =====================================================
 
-    const xTolerance =
-      18
+    let trackCenters =
+      []
+
+    for (
+      const bubble of sortedBubbles
+    ) {
+      trackCenters.push(
+        bubble.centerX
+      )
+    }
+
+    // =====================================================
+    // K-MEANS 1 DIMENSI
+    //
+    // Kita tidak menentukan jarak bubble.
+    //
+    // Sistem sendiri mencari 15 kelompok
+    // berdasarkan distribusi posisi X.
+    // =====================================================
+
+    let centers = []
+
+    // Ambil titik awal yang tersebar merata
+    for (
+      let i = 0;
+      i < expectedTrackCount;
+      i++
+    ) {
+      const position =
+        Math.floor(
+          (
+            i *
+            (
+              trackCenters.length -
+              1
+            )
+          ) /
+          (
+            expectedTrackCount -
+            1
+          )
+        )
+
+      centers.push(
+        trackCenters[position]
+      )
+    }
+
+    // =====================================================
+    // ULANGI PENGELOMPOKAN
+    // =====================================================
+
+    for (
+      let iteration = 0;
+      iteration < 30;
+      iteration++
+    ) {
+      const groups =
+        Array.from(
+          {
+            length:
+              expectedTrackCount,
+          },
+          () => []
+        )
+
+      // -----------------------------------------------
+      // Masukkan setiap bubble ke pusat terdekat
+      // -----------------------------------------------
+
+      for (
+        const bubble of sortedBubbles
+      ) {
+        let nearestIndex = 0
+
+        let nearestDistance =
+          Infinity
+
+        for (
+          let centerIndex = 0;
+          centerIndex <
+            centers.length;
+          centerIndex++
+        ) {
+          const distance =
+            Math.abs(
+              bubble.centerX -
+              centers[centerIndex]
+            )
+
+          if (
+            distance <
+            nearestDistance
+          ) {
+            nearestDistance =
+              distance
+
+            nearestIndex =
+              centerIndex
+          }
+        }
+
+        groups[
+          nearestIndex
+        ].push(
+          bubble
+        )
+      }
+
+      // -----------------------------------------------
+      // Hitung ulang pusat setiap jalur
+      // -----------------------------------------------
+
+      const newCenters =
+        []
+
+      for (
+        let groupIndex = 0;
+        groupIndex <
+          groups.length;
+        groupIndex++
+      ) {
+        const group =
+          groups[groupIndex]
+
+        if (
+          group.length === 0
+        ) {
+          newCenters.push(
+            centers[groupIndex]
+          )
+
+          continue
+        }
+
+        const averageX =
+          group.reduce(
+            (
+              sum,
+              bubble
+            ) =>
+              sum +
+              bubble.centerX,
+            0
+          ) /
+          group.length
+
+        newCenters.push(
+          averageX
+        )
+      }
+
+      // -----------------------------------------------
+      // Cek apakah sudah stabil
+      // -----------------------------------------------
+
+      let movement = 0
+
+      for (
+        let centerIndex = 0;
+        centerIndex <
+          centers.length;
+        centerIndex++
+      ) {
+        movement +=
+          Math.abs(
+            centers[
+              centerIndex
+            ] -
+            newCenters[
+              centerIndex
+            ]
+          )
+      }
+
+      centers =
+        newCenters
+
+      if (
+        movement < 0.5
+      ) {
+        break
+      }
+    }
+
+    // =====================================================
+    // BUAT TRACK FINAL
+    // =====================================================
+
+    const xClusters =
+      centers
+        .map(
+          (
+            centerX,
+            centerIndex
+          ) => ({
+            centerX,
+            bubbles:
+              [],
+            index:
+              centerIndex,
+          })
+        )
+        .sort(
+          (
+            firstCluster,
+            secondCluster
+          ) =>
+            firstCluster.centerX -
+            secondCluster.centerX
+        )
+
+    // =====================================================
+    // MASUKKAN BUBBLE KE TRACK TERDEKAT
+    // =====================================================
 
     for (
       const bubble of sortedBubbles
@@ -1406,7 +1628,8 @@ const readStudentAnswers = (
         Infinity
 
       for (
-        const cluster of xClusters
+        const cluster of
+          xClusters
       ) {
         const distance =
           Math.abs(
@@ -1427,58 +1650,19 @@ const readStudentAnswers = (
       }
 
       if (
-        nearestCluster &&
-        nearestDistance <=
-          xTolerance
+        nearestCluster
       ) {
         nearestCluster.bubbles.push(
           bubble
         )
-
-        nearestCluster.centerX =
-          nearestCluster.bubbles.reduce(
-            (
-              sum,
-              item
-            ) =>
-              sum +
-              item.centerX,
-            0
-          ) /
-          nearestCluster.bubbles
-            .length
-      } else {
-        xClusters.push({
-          centerX:
-            bubble.centerX,
-          bubbles: [
-            bubble,
-          ],
-        })
       }
     }
 
     // =====================================================
-    // PILIH JALUR BUBBLE YANG PANJANG
+    // URUTKAN TRACK DARI KIRI → KANAN
     // =====================================================
 
-    const minimumBubblePerTrack =
-      Math.max(
-        8,
-        Math.floor(
-          questionsPerColumn *
-            0.30
-        )
-      )
-
-    let validTracks =
-      xClusters.filter(
-        cluster =>
-          cluster.bubbles.length >=
-          minimumBubblePerTrack
-      )
-
-    validTracks.sort(
+    xClusters.sort(
       (
         firstCluster,
         secondCluster
@@ -1487,56 +1671,50 @@ const readStudentAnswers = (
         secondCluster.centerX
     )
 
-    const expectedTrackCount =
-      columnCount * 5
+    // =====================================================
+    // DEBUG TRACK
+    // =====================================================
+
+    console.log(
+      "TRACK X:",
+      xClusters.map(
+        cluster =>
+          Math.round(
+            cluster.centerX
+          )
+      )
+    )
+
+    console.log(
+      "JUMLAH BUBBLE PER TRACK:",
+      xClusters.map(
+        cluster =>
+          cluster.bubbles.length
+      )
+    )
+
+    // =====================================================
+    // CEK 15 TRACK
+    // =====================================================
 
     if (
-      validTracks.length >
-      expectedTrackCount
-    ) {
-      validTracks =
-        [...validTracks]
-          .sort(
-            (
-              firstCluster,
-              secondCluster
-            ) =>
-              secondCluster
-                .bubbles
-                .length -
-              firstCluster
-                .bubbles
-                .length
-          )
-          .slice(
-            0,
-            expectedTrackCount
-          )
-          .sort(
-            (
-              firstCluster,
-              secondCluster
-            ) =>
-              firstCluster.centerX -
-              secondCluster.centerX
-          )
-    }
-
-    if (
-      validTracks.length <
+      xClusters.length <
       expectedTrackCount
     ) {
       return {
         answers: {},
         debug:
           `❌ Jalur tidak lengkap: ` +
-          `${validTracks.length}/${expectedTrackCount} | ` +
+          `${xClusters.length}/${expectedTrackCount} | ` +
           `Bubble: ${bubbles.length}`,
       }
     }
 
     // =====================================================
-    // BAGI JALUR MENJADI KOLOM
+    // BAGI MENJADI KOLOM
+    //
+    // Track:
+    // A B C D E | A B C D E | A B C D E
     // =====================================================
 
     const columns = []
@@ -1547,16 +1725,16 @@ const readStudentAnswers = (
         columnCount;
       columnNumber++
     ) {
-      const columnStart =
+      const startIndex =
         columnNumber * 5
 
-      const columnEnd =
-        columnStart + 5
+      const endIndex =
+        startIndex + 5
 
       const column =
-        validTracks.slice(
-          columnStart,
-          columnEnd
+        xClusters.slice(
+          startIndex,
+          endIndex
         )
 
       columns.push(
