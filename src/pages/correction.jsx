@@ -318,14 +318,10 @@ function Correction() {
   // =====================================================
 
   const detectAnswerSheet = (canvas) => {
-    if (
-      !window.cv ||
-      !window.cv.Mat
-    ) {
+    if (!window.cv || !window.cv.Mat) {
       return {
         detected: false,
-        message:
-          "OpenCV belum siap.",
+        message: "OpenCV belum siap.",
       }
     }
 
@@ -333,6 +329,7 @@ function Correction() {
 
     let src = null
     let gray = null
+    let blur = null
     let threshold = null
     let contours = null
     let hierarchy = null
@@ -340,12 +337,14 @@ function Correction() {
     try {
       src = cv.imread(canvas)
 
-      const width = src.cols
-      const height = src.rows
+      const imageWidth = src.cols
+      const imageHeight = src.rows
+      const imageArea =
+        imageWidth * imageHeight
 
-      // ================================================
-      // GRAYSCALE
-      // ================================================
+      // ==========================================
+      // 1. GRAYSCALE
+      // ==========================================
 
       gray = new cv.Mat()
 
@@ -355,23 +354,39 @@ function Correction() {
         cv.COLOR_RGBA2GRAY
       )
 
-      // ================================================
-      // THRESHOLD HITAM
-      // ================================================
+      // ==========================================
+      // 2. BLUR
+      // ==========================================
+
+      blur = new cv.Mat()
+
+      cv.GaussianBlur(
+        gray,
+        blur,
+        new cv.Size(5, 5),
+        0
+      )
+
+      // ==========================================
+      // 3. THRESHOLD PUTIH
+      //
+      // LJK putih
+      // background cokelat/oranye
+      // ==========================================
 
       threshold = new cv.Mat()
 
       cv.threshold(
-        gray,
+        blur,
         threshold,
-        100,
+        180,
         255,
-        cv.THRESH_BINARY_INV
+        cv.THRESH_BINARY
       )
 
-      // ================================================
-      // CARI CONTOUR
-      // ================================================
+      // ==========================================
+      // 4. CARI CONTOUR
+      // ==========================================
 
       contours =
         new cv.MatVector()
@@ -389,6 +404,10 @@ function Correction() {
 
       const candidates = []
 
+      // ==========================================
+      // 5. CARI BENTUK KERTAS
+      // ==========================================
+
       for (
         let i = 0;
         i < contours.size();
@@ -400,386 +419,225 @@ function Correction() {
         const area =
           cv.contourArea(contour)
 
-        if (area < 80) {
-          contour.delete()
-          continue
-        }
-
-        const rect =
-          cv.boundingRect(contour)
-
-        const rectWidth =
-          rect.width
-
-        const rectHeight =
-          rect.height
-
+        // Kertas harus cukup besar
         if (
-          rectWidth < 8 ||
-          rectHeight < 8
+          area <
+          imageArea * 0.10
         ) {
           contour.delete()
           continue
         }
 
-        const ratio =
-          rectWidth /
-          rectHeight
+        const perimeter =
+          cv.arcLength(
+            contour,
+            true
+          )
 
-        // Marker berbentuk hampir kotak
-        if (
-          ratio < 0.65 ||
-          ratio > 1.35
-        ) {
-          contour.delete()
-          continue
-        }
+        const approx =
+          new cv.Mat()
 
-        const contourArea =
-          Math.max(area, 1)
-
-        const rectangleArea =
-          rectWidth *
-          rectHeight
-
-        const fillRatio =
-          contourArea /
-          rectangleArea
-
-        // Marker hitam harus cukup padat
-        if (fillRatio < 0.55) {
-          contour.delete()
-          continue
-        }
-
-        const center = {
-          x:
-            rect.x +
-            rect.width / 2,
-
-          y:
-            rect.y +
-            rect.height / 2,
-        }
-
-        // ==============================================
-        // UKURAN RELATIF MARKER
-        // ==============================================
-
-        const relativeWidth =
-          rectWidth / width
-
-        const relativeHeight =
-          rectHeight / height
-
-        // Marker terlalu kecil biasanya noise
-        if (
-          relativeWidth < 0.005 ||
-          relativeHeight < 0.005
-        ) {
-          contour.delete()
-          continue
-        }
-
-        // Marker terlalu besar kemungkinan bukan marker
-        if (
-          relativeWidth > 0.15 ||
-          relativeHeight > 0.15
-        ) {
-          contour.delete()
-          continue
-        }
-
-        candidates.push({
-          center,
-          width: rectWidth,
-          height: rectHeight,
-          area,
-          fillRatio,
-        })
-
-        contour.delete()
-      }
-
-      if (candidates.length < 4) {
-        return {
-          detected: false,
-          message:
-            "❌ 4 marker hitam belum ditemukan. Pastikan keempat marker terlihat jelas.",
-        }
-      }
-
-      // =================================================
-      // CARI KOMBINASI 4 MARKER
-      //
-      // Tidak langsung mengambil 4 terbesar.
-      // Kita mencari kombinasi yang bentuknya
-      // paling mirip persegi panjang.
-      // =================================================
-
-      let bestGroup = null
-      let bestScore = -Infinity
-
-      const maxCandidates =
-        Math.min(
-          candidates.length,
-          30
+        cv.approxPolyDP(
+          contour,
+          approx,
+          0.02 * perimeter,
+          true
         )
 
-      const limitedCandidates =
-        [...candidates]
-          .sort(
-            (a, b) =>
-              b.area - a.area
-          )
-          .slice(
-            0,
-            maxCandidates
-          )
-
-      for (
-        let a = 0;
-        a < limitedCandidates.length;
-        a++
-      ) {
-        for (
-          let b = a + 1;
-          b < limitedCandidates.length;
-          b++
+        // Kita butuh 4 sudut
+        if (
+          approx.rows === 4
         ) {
+          const points = []
+
           for (
-            let c = b + 1;
-            c < limitedCandidates.length;
-            c++
+            let j = 0;
+            j < 4;
+            j++
           ) {
-            for (
-              let d = c + 1;
-              d < limitedCandidates.length;
-              d++
+            const x =
+              approx.intAt(
+                j,
+                0
+              )
+
+            const y =
+              approx.intAt(
+                j,
+                1
+              )
+
+            points.push({
+              x,
+              y,
+            })
+          }
+
+          // ======================================
+          // BOUNDING RECT
+          // ======================================
+
+          const rect =
+            cv.boundingRect(
+              contour
+            )
+
+          const width =
+            rect.width
+
+          const height =
+            rect.height
+
+          if (
+            width > 0 &&
+            height > 0
+          ) {
+            const ratio =
+              width / height
+
+            /*
+            * F4 portrait:
+            *
+            * 210 / 330
+            * ≈ 0.636
+            *
+            * Karena foto bisa miring,
+            * kita beri toleransi cukup besar.
+            */
+
+            if (
+              ratio >= 0.45 &&
+              ratio <= 0.90
             ) {
-              const group = [
-                limitedCandidates[a],
-                limitedCandidates[b],
-                limitedCandidates[c],
-                limitedCandidates[d],
-              ]
-
-              const ordered =
-                orderMarkers(
-                  group.map(
-                    (item) =>
-                      item.center
-                  )
-                )
-
-              if (!ordered) {
-                continue
-              }
-
-              const widthTop =
-                distance(
-                  ordered.topLeft,
-                  ordered.topRight
-                )
-
-              const widthBottom =
-                distance(
-                  ordered.bottomLeft,
-                  ordered.bottomRight
-                )
-
-              const heightLeft =
-                distance(
-                  ordered.topLeft,
-                  ordered.bottomLeft
-                )
-
-              const heightRight =
-                distance(
-                  ordered.topRight,
-                  ordered.bottomRight
-                )
-
-              if (
-                widthTop < 50 ||
-                widthBottom < 50 ||
-                heightLeft < 80 ||
-                heightRight < 80
-              ) {
-                continue
-              }
-
-              const avgWidth =
-                (widthTop +
-                  widthBottom) /
-                2
-
-              const avgHeight =
-                (heightLeft +
-                  heightRight) /
-                2
-
-              const ratio =
-                avgWidth /
-                avgHeight
-
-              // F4 portrait = 210 / 330
-              const f4Ratio =
-                210 / 330
-
-              const ratioError =
-                Math.abs(
-                  ratio -
-                    f4Ratio
-                )
-
-              if (
-                ratioError > 0.25
-              ) {
-                continue
-              }
-
-              // Ukuran marker relatif harus mirip
-              const markerWidths =
-                group.map(
-                  (item) =>
-                    item.width
-                )
-
-              const averageMarkerWidth =
-                markerWidths.reduce(
-                  (sum, value) =>
-                    sum + value,
-                  0
-                ) /
-                markerWidths.length
-
-              const markerSizeError =
-                group.reduce(
-                  (sum, item) =>
-                    sum +
-                    Math.abs(
-                      item.width -
-                        averageMarkerWidth
-                    ),
-                  0
-                ) /
-                group.length
-
-              const markerSizeScore =
-                Math.max(
-                  0,
-                  1 -
-                    markerSizeError /
-                      Math.max(
-                        averageMarkerWidth,
-                        1
-                      )
-                )
-
-              // Kedekatan ratio
-              const ratioScore =
-                Math.max(
-                  0,
-                  1 -
-                    ratioError /
-                      0.25
-                )
-
-              // Keempat marker harus membentuk
-              // kertas yang cukup besar
-              const sizeScore =
-                Math.min(
-                  avgHeight /
-                    (height *
-                      0.45),
-                  1
-                )
-
-              const score =
-                ratioScore * 0.55 +
-                markerSizeScore *
-                  0.25 +
-                sizeScore * 0.20
-
-              if (
-                score >
-                bestScore
-              ) {
-                bestScore = score
-
-                bestGroup =
-                  ordered
-              }
+              candidates.push({
+                points,
+                area,
+                ratio,
+              })
             }
           }
         }
+
+        approx.delete()
+        contour.delete()
       }
 
-      if (!bestGroup) {
+      // ==========================================
+      // 6. TIDAK ADA KERTAS
+      // ==========================================
+
+      if (
+        candidates.length === 0
+      ) {
         return {
           detected: false,
           message:
-            "❌ Marker hitam belum dapat dipastikan. Pastikan seluruh LJK terlihat.",
+            "❌ LJK belum terdeteksi. Pastikan seluruh kertas terlihat jelas.",
+        }
+      }
+
+      // ==========================================
+      // 7. AMBIL KANDIDAT TERBESAR
+      // ==========================================
+
+      candidates.sort(
+        (a, b) =>
+          b.area - a.area
+      )
+
+      const best =
+        candidates[0]
+
+      // ==========================================
+      // 8. URUTKAN 4 SUDUT
+      // ==========================================
+
+      const ordered =
+        orderMarkers(
+          best.points
+        )
+
+      if (!ordered) {
+        return {
+          detected: false,
+          message:
+            "❌ Gagal menentukan 4 sudut LJK.",
         }
       }
 
       console.log(
-        "===== MARKER LJK ====="
+        "===== KERTAS LJK TERDETEKSI ====="
       )
 
       console.log(
-        "TL:",
-        bestGroup.topLeft
+        "Top Left:",
+        ordered.topLeft
       )
 
       console.log(
-        "TR:",
-        bestGroup.topRight
+        "Top Right:",
+        ordered.topRight
       )
 
       console.log(
-        "BL:",
-        bestGroup.bottomLeft
+        "Bottom Left:",
+        ordered.bottomLeft
       )
 
       console.log(
-        "BR:",
-        bestGroup.bottomRight
+        "Bottom Right:",
+        ordered.bottomRight
       )
 
       console.log(
-        "Score:",
-        bestScore
+        "Area:",
+        best.area
+      )
+
+      console.log(
+        "Rasio:",
+        best.ratio
       )
 
       return {
         detected: true,
+
         message:
-          "✅ 4 marker LJK berhasil ditemukan.",
-        markers: bestGroup,
+          "✅ LJK berhasil terdeteksi.",
+
+        markers: ordered,
       }
     } catch (error) {
       console.error(
-        "ERROR DETEKSI MARKER:",
+        "ERROR DETEKSI LJK:",
         error
       )
 
       return {
         detected: false,
+
         message:
-          `❌ Gagal mendeteksi marker: ${
+          `❌ Gagal mendeteksi LJK: ${
             error?.message ||
             "error tidak diketahui"
           }`,
       }
     } finally {
-      if (src) src.delete()
-      if (gray) gray.delete()
+      if (src)
+        src.delete()
+
+      if (gray)
+        gray.delete()
+
+      if (blur)
+        blur.delete()
+
       if (threshold)
         threshold.delete()
+
       if (contours)
         contours.delete()
+
       if (hierarchy)
         hierarchy.delete()
     }
@@ -796,14 +654,8 @@ function Correction() {
   // 840 x 1320 = 4 pixel/mm
   // =====================================================
 
-  const warpAnswerSheet = (
-    canvas,
-    markers
-  ) => {
-    if (
-      !window.cv ||
-      !window.cv.Mat
-    ) {
+  const warpAnswerSheet = (canvas, markers) => {
+    if (!window.cv || !window.cv.Mat) {
       return null
     }
 
@@ -818,11 +670,14 @@ function Correction() {
     try {
       src = cv.imread(canvas)
 
-      const width = 840
-      const height = 1320
+      // Ukuran hasil akhir LJK
+      // F4 = 210mm x 330mm
+      const outputWidth = 840
+      const outputHeight = 1320
 
-      // Marker center = 11mm dari tepi
-      const markerOffset = 44
+      // =================================================
+      // 4 SUDUT KERTAS ASLI
+      // =================================================
 
       const srcPoints = [
         markers.topLeft.x,
@@ -838,45 +693,49 @@ function Correction() {
         markers.bottomLeft.y,
       ]
 
+      // =================================================
+      // HASIL AKHIR
+      //
+      // Seluruh canvas hanya berisi LJK.
+      // Tidak ada background meja.
+      // =================================================
+
       const dstPoints = [
-        markerOffset,
-        markerOffset,
+        0,
+        0,
 
-        width -
-          markerOffset,
-        markerOffset,
+        outputWidth,
+        0,
 
-        width -
-          markerOffset,
-        height -
-          markerOffset,
+        outputWidth,
+        outputHeight,
 
-        markerOffset,
-        height -
-          markerOffset,
+        0,
+        outputHeight,
       ]
 
-      srcTri =
-        cv.matFromArray(
-          4,
-          1,
-          cv.CV_32FC2,
-          srcPoints
-        )
+      srcTri = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        srcPoints
+      )
 
-      dstTri =
-        cv.matFromArray(
-          4,
-          1,
-          cv.CV_32FC2,
-          dstPoints
-        )
+      dstTri = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        dstPoints
+      )
 
-      matrix =
-        cv.getPerspectiveTransform(
-          srcTri,
-          dstTri
-        )
+      // =================================================
+      // PERSPECTIVE TRANSFORM
+      // =================================================
+
+      matrix = cv.getPerspectiveTransform(
+        srcTri,
+        dstTri
+      )
 
       dst = new cv.Mat()
 
@@ -885,10 +744,10 @@ function Correction() {
         dst,
         matrix,
         new cv.Size(
-          width,
-          height
+          outputWidth,
+          outputHeight
         ),
-        cv.INTER_LINEAR,
+        cv.INTER_CUBIC,
         cv.BORDER_CONSTANT,
         new cv.Scalar(
           255,
@@ -898,16 +757,19 @@ function Correction() {
         )
       )
 
+      // =================================================
+      // CANVAS HASIL
+      // HANYA LJK
+      // =================================================
+
       const resultCanvas =
-        document.createElement(
-          "canvas"
-        )
+        document.createElement("canvas")
 
       resultCanvas.width =
-        width
+        outputWidth
 
       resultCanvas.height =
-        height
+        outputHeight
 
       cv.imshow(
         resultCanvas,
@@ -917,7 +779,7 @@ function Correction() {
       return resultCanvas
     } catch (error) {
       console.error(
-        "ERROR WARP:",
+        "ERROR WARP LJK:",
         error
       )
 
@@ -925,12 +787,9 @@ function Correction() {
     } finally {
       if (src) src.delete()
       if (dst) dst.delete()
-      if (srcTri)
-        srcTri.delete()
-      if (dstTri)
-        dstTri.delete()
-      if (matrix)
-        matrix.delete()
+      if (srcTri) srcTri.delete()
+      if (dstTri) dstTri.delete()
+      if (matrix) matrix.delete()
     }
   }
 
