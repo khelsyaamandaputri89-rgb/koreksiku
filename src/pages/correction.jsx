@@ -869,27 +869,40 @@ function Correction() {
   // DIHITUNG DARI CSS AnswerSheet.jsx
   // =====================================================
 
-  const getBubblePositions = (
-    totalQuestions
-  ) => {
-    const layout =
-      getSheetLayout(
-        totalQuestions
-      )
+  const getBubblePositions = (totalQuestions) => {
+    const columnCount =
+      totalQuestions >= 80 ? 3 : 2
 
-    const {
-      columnCount,
-    } = layout
+    const questionsPerColumn = Math.ceil(
+      totalQuestions / columnCount
+    )
 
-    const positions = []
+    const rowHeightMm =
+      totalQuestions >= 80
+        ? 4.8
+        : totalQuestions >= 60
+        ? 5
+        : 5.5
 
-    /*
-     * Kertas:
-     * width 210mm
-     * padding kiri/kanan 15mm
-     *
-     * Area isi = 180mm
-     */
+    const bubbleSizeMm =
+      totalQuestions >= 100
+        ? 4
+        : totalQuestions >= 90
+        ? 4.2
+        : totalQuestions >= 80
+        ? 4.3
+        : totalQuestions >= 70
+        ? 4.5
+        : 5
+
+    // =====================================================
+    // POSISI KERTAS
+    //
+    // AnswerSheet:
+    // width 210mm
+    // padding kiri 15mm
+    // padding kanan 15mm
+    // =====================================================
 
     const contentLeft = 15
     const contentWidth = 180
@@ -907,61 +920,25 @@ function Correction() {
       ) /
       columnCount
 
-    /*
-     * AnswerSheet.jsx:
-     *
-     * 2 kolom:
-     * nomor = 9mm
-     *
-     * 3 kolom:
-     * nomor = 7mm
-     */
+    // =====================================================
+    // POSISI NOMOR
+    // =====================================================
 
     const numberWidth =
       columnCount === 3
         ? 7
         : 9
 
-    /*
-     * Margin kanan nomor
-     */
-    const numberMargin =
-      1.5
+    const numberMargin = 1.5
 
-    /*
-     * Lebar setiap pilihan:
-     *
-     * 2 kolom = 10mm
-     * 3 kolom = 7.2mm
-     */
+    // =====================================================
+    // SLOT A-E
+    // =====================================================
 
-    const choiceWidth =
+    const choiceSlotWidth =
       columnCount === 3
         ? 7.2
         : 10
-
-    /*
-     * Bubble center:
-     *
-     * 2 kolom:
-     * bubble = 5mm
-     *
-     * 3 kolom:
-     * bubble = 4.3mm
-     */
-
-    const bubbleSize =
-      columnCount === 3
-        ? 4.3
-        : totalQuestions >= 100
-        ? 4
-        : totalQuestions >= 90
-        ? 4.2
-        : totalQuestions >= 80
-        ? 4.3
-        : totalQuestions >= 70
-        ? 4.5
-        : 5
 
     const choices = [
       "A",
@@ -971,67 +948,129 @@ function Correction() {
       "E",
     ]
 
+    /*
+    * -----------------------------------------------------
+    * PENTING
+    *
+    * Bubble dan huruf berada di dalam:
+    *
+    * display:flex
+    * justify-content:center
+    * gap:0.6mm / 1mm
+    *
+    * Jadi kita hitung posisi bubble dari
+    * TENGAH isi slot, bukan langsung dari
+    * sisi kiri slot.
+    * -----------------------------------------------------
+    */
+
+    const letterWidth =
+      columnCount === 3
+        ? 1.8
+        : 2
+
+    const gap =
+      columnCount === 3
+        ? 0.6
+        : 1
+
+    const contentWidthInsideSlot =
+      bubbleSizeMm +
+      gap +
+      letterWidth
+
+    const bubbleOffsetInsideSlot =
+      (
+        choiceSlotWidth -
+        contentWidthInsideSlot
+      ) /
+      2
+
+    const bubbleCenterOffset =
+      bubbleOffsetInsideSlot +
+      bubbleSizeMm / 2
+
+    // =====================================================
+    // POSISI Y
+    //
+    // Ini kita set lebih dekat dengan layout
+    // AnswerSheet.jsx.
+    // =====================================================
+
+    const questionStartYmm =
+      totalQuestions >= 100
+        ? 87
+        : totalQuestions >= 90
+        ? 87
+        : totalQuestions >= 80
+        ? 87
+        : totalQuestions >= 70
+        ? 88
+        : totalQuestions >= 60
+        ? 89
+        : 90
+
+    const positions = []
+
     for (
       let columnIndex = 0;
-      columnIndex <
-      columnCount;
+      columnIndex < columnCount;
       columnIndex++
     ) {
       const columnStart =
         contentLeft +
         columnIndex *
-          (columnWidth +
-            columnGap)
+          (
+            columnWidth +
+            columnGap
+          )
 
-      /*
-       * Posisi awal A
-       */
-      const firstBubbleCenter =
+      const firstChoiceStart =
         columnStart +
         numberWidth +
-        numberMargin +
-        bubbleSize / 2
+        numberMargin
 
       const questionCount =
         Math.min(
-          layout.questionsPerColumn,
+          questionsPerColumn,
           totalQuestions -
             columnIndex *
-              layout.questionsPerColumn
+              questionsPerColumn
         )
 
       for (
         let rowIndex = 0;
-        rowIndex <
-        questionCount;
+        rowIndex < questionCount;
         rowIndex++
       ) {
         const questionNumber =
           columnIndex *
-            layout.questionsPerColumn +
+            questionsPerColumn +
           rowIndex +
           1
 
         const y =
-          layout.questionStartYmm +
-          layout.rowHeightMm *
-            rowIndex +
-          layout.rowHeightMm /
-            2
+          questionStartYmm +
+          rowIndex *
+            rowHeightMm +
+          rowHeightMm / 2
 
         const choicesPosition = {}
 
         choices.forEach(
-          (
-            choice,
-            choiceIndex
-          ) => {
+          (choice, choiceIndex) => {
+            const slotStart =
+              firstChoiceStart +
+              choiceIndex *
+                choiceSlotWidth
+
+            const bubbleCenter =
+              slotStart +
+              bubbleCenterOffsetInsideSlot
+
             choicesPosition[
               choice
-            ] =
-              firstBubbleCenter +
-              choiceIndex *
-                choiceWidth
+            ] = bubbleCenter
           }
         )
 
@@ -1044,6 +1083,48 @@ function Correction() {
         })
       }
     }
+
+    console.log(
+      "===== POSISI OMR ====="
+    )
+
+    console.log(
+      "Jumlah soal:",
+      totalQuestions
+    )
+
+    console.log(
+      "Kolom:",
+      columnCount
+    )
+
+    console.log(
+      "Soal per kolom:",
+      questionsPerColumn
+    )
+
+    console.log(
+      "Start Y:",
+      questionStartYmm,
+      "mm"
+    )
+
+    console.log(
+      "Row:",
+      rowHeightMm,
+      "mm"
+    )
+
+    console.log(
+      "Bubble:",
+      bubbleSizeMm,
+      "mm"
+    )
+
+    console.log(
+      "Posisi nomor 1:",
+      positions[0]
+    )
 
     return positions
   }
@@ -1267,6 +1348,13 @@ function Correction() {
       const pxPerMmY =
         canvas.height / 330
 
+      const bubbleRadius =
+        (
+          layout.bubbleSizeMm /
+          2
+        ) *
+        pxPerMmX
+
       for (
         const position of positions
       ) {
@@ -1315,7 +1403,8 @@ function Correction() {
                 gray,
                 centerX,
                 centerY,
-                radius
+                radius,
+                bubbleRadius
               )
 
             inkValues.push(
@@ -1405,7 +1494,7 @@ function Correction() {
           second >
             EMPTY_THRESHOLD &&
           second >=
-            highest * 0.82
+            highest * 0.94
 
         if (isDouble) {
           answers[
