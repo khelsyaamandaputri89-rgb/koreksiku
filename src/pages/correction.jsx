@@ -1066,7 +1066,7 @@ function Correction() {
 
             const bubbleCenter =
               slotStart +
-              bubbleCenterOffsetInsideSlot
+              bubbleCenterOffset
 
             choicesPosition[
               choice
