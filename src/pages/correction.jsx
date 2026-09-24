@@ -1113,104 +1113,156 @@ function Correction() {
     canvas,
     totalQuestions
   ) => {
-    if (
-      !window.cv ||
-      !window.cv.Mat
-    ) {
+    if (!window.cv || !window.cv.Mat) {
       return {
         answers: {},
-        debug:
-          "❌ OpenCV belum siap.",
+        debug: "❌ OpenCV belum siap.",
       }
     }
 
     const cv = window.cv
 
-    let source = null
+    let src = null
     let gray = null
     let blur = null
 
     try {
-      source =
-        cv.imread(canvas)
+      src = cv.imread(canvas)
 
-      gray =
-        new cv.Mat()
+      gray = new cv.Mat()
 
       cv.cvtColor(
-        source,
+        src,
         gray,
         cv.COLOR_RGBA2GRAY
       )
 
-      blur =
-        new cv.Mat()
+      blur = new cv.Mat()
 
       cv.GaussianBlur(
         gray,
         blur,
-        new cv.Size(
-          3,
-          3
-        ),
+        new cv.Size(3, 3),
         0
       )
 
-      /*
-       * ===================================================
-       * KOORDINAT LJK ASLI
-       *
-       * Diperoleh dari layout 100 soal pada LJK kamu
-       * setelah di-warp menjadi 840 x 1320.
-       *
-       * Kolom 1 : 1 - 34
-       * Kolom 2 : 35 - 68
-       * Kolom 3 : 69 - 100
-       * ===================================================
-       */
+      // =====================================================
+      // KONFIGURASI MASING-MASING TEMPLATE
+      // =====================================================
+
+      const layouts = {
+        40: {
+          columns: 2,
+          perColumn: 20,
+
+          // posisi X bubble A-E
+          x: [
+            [130, 155, 180, 205, 230],
+            [450, 475, 500, 525, 550],
+          ],
+
+          firstY: 361,
+          rowStep: 24.5,
+        },
+
+        50: {
+          columns: 2,
+          perColumn: 25,
+
+          x: [
+            [130, 155, 180, 205, 230],
+            [450, 475, 500, 525, 550],
+          ],
+
+          firstY: 361,
+          rowStep: 19.4,
+        },
+
+        60: {
+          columns: 2,
+          perColumn: 30,
+
+          x: [
+            [130, 155, 180, 205, 230],
+            [450, 475, 500, 525, 550],
+          ],
+
+          firstY: 361,
+          rowStep: 16.2,
+        },
+
+        70: {
+          columns: 2,
+          perColumn: 35,
+
+          x: [
+            [130, 155, 180, 205, 230],
+            [450, 475, 500, 525, 550],
+          ],
+
+          firstY: 361,
+          rowStep: 13.8,
+        },
+
+        80: {
+          columns: 3,
+          perColumn: 27,
+
+          x: [
+            [136, 161, 187, 211, 239],
+            [354, 378, 403, 427, 455],
+            [568, 594, 619, 646, 670],
+          ],
+
+          firstY: 361,
+          rowStep: 21.8,
+        },
+
+        90: {
+          columns: 3,
+          perColumn: 30,
+
+          x: [
+            [136, 161, 187, 211, 239],
+            [354, 378, 403, 427, 455],
+            [568, 594, 619, 646, 670],
+          ],
+
+          firstY: 361,
+          rowStep: 19.5,
+        },
+
+        100: {
+          columns: 3,
+          perColumn: 34,
+
+          x: [
+            [136, 161, 187, 211, 239],
+            [354, 378, 403, 427, 455],
+            [568, 594, 619, 646, 670],
+          ],
+
+          firstY: 361,
+          rowStep: 17.3,
+        },
+      }
+
+      const layout =
+        layouts[totalQuestions]
+
+      if (!layout) {
+        return {
+          answers: {},
+          debug:
+            `❌ Layout ${totalQuestions} soal belum tersedia.`,
+        }
+      }
 
       const scaleX =
-        source.cols / 840
+        src.cols / 840
 
       const scaleY =
-        source.rows / 1320
-
-      const xCentersBase = [
-        [
-          136,
-          161,
-          187,
-          211,
-          239,
-        ],
-        [
-          354,
-          378,
-          403,
-          427,
-          455,
-        ],
-        [
-          568,
-          594,
-          619,
-          646,
-          670,
-        ],
-      ]
-
-      /*
-       * Pusat bubble nomor 1.
-       *
-       * Jarak antar baris:
-       * sekitar 17.3 px
-       */
-
-      const firstYBase =
-        361
-
-      const rowStepBase =
-        17.3
+        src.rows / 1320
 
       const choices = [
         "A",
@@ -1220,76 +1272,60 @@ function Correction() {
         "E",
       ]
 
-      const columnCount =
-        totalQuestions >= 80
-          ? 3
-          : 2
-
-      const questionsPerColumn =
-        Math.ceil(
-          totalQuestions /
-            columnCount
-        )
-
-      // =================================================
-      // UKUR TINTA
-      // =================================================
+      // =====================================================
+      // BACA KEHITAMAN BUBBLE
+      // =====================================================
 
       const measureInk = (
         centerX,
         centerY
       ) => {
         /*
-         * Bubble diameter sekitar 4mm.
-         * Pada 840px / 210mm = 4px/mm,
-         * diameter sekitar 16px.
-         *
-         * Kita hanya membaca lingkaran bagian
-         * DALAM supaya garis bubble tidak dianggap
-         * sebagai arsiran.
-         */
+        * Jangan membaca seluruh lingkaran.
+        * Hanya bagian tengah bubble.
+        */
 
         const radius =
-          5.2 *
+          5.5 *
           (
             scaleX +
             scaleY
           ) /
           2
 
-        const radiusSquared =
-          radius * radius
+        const innerRadius =
+          radius * 0.72
 
-        const startX =
+        const minX =
           Math.floor(
             centerX -
-              radius
+            innerRadius
           )
 
-        const endX =
+        const maxX =
           Math.ceil(
             centerX +
-              radius
+            innerRadius
           )
 
-        const startY =
+        const minY =
           Math.floor(
             centerY -
-              radius
+            innerRadius
           )
 
-        const endY =
+        const maxY =
           Math.ceil(
             centerY +
-              radius
+            innerRadius
           )
 
         let dark = 0
         let total = 0
 
         for (
-          let y = startY;
-          y <= endY;
+          let y = minY;
+          y <= maxY;
           y++
         ) {
           if (
@@ -1300,8 +1336,8 @@ function Correction() {
           }
 
           for (
-            let x = startX;
-            x <= endX;
+            let x = minX;
+            x <= maxX;
             x++
           ) {
             if (
@@ -1312,17 +1348,16 @@ function Correction() {
             }
 
             const dx =
-              x -
-              centerX
+              x - centerX
 
             const dy =
-              y -
-              centerY
+              y - centerY
 
             if (
               dx * dx +
-                dy * dy >
-              radiusSquared
+              dy * dy >
+              innerRadius *
+                innerRadius
             ) {
               continue
             }
@@ -1335,12 +1370,8 @@ function Correction() {
 
             total++
 
-            /*
-             * Bagian bubble yang benar-benar
-             * dihitamkan jauh lebih gelap.
-             */
             if (
-              value < 155
+              value < 150
             ) {
               dark++
             }
@@ -1352,9 +1383,9 @@ function Correction() {
           : 0
       }
 
-      // =================================================
+      // =====================================================
       // BACA SEMUA SOAL
-      // =================================================
+      // =====================================================
 
       const answers = {}
 
@@ -1376,47 +1407,45 @@ function Correction() {
         const columnIndex =
           Math.floor(
             questionIndex /
-              questionsPerColumn
+            layout.perColumn
           )
 
         const rowIndex =
           questionIndex %
-          questionsPerColumn
+          layout.perColumn
 
-        if (
-          columnIndex >=
-          xCentersBase.length
-        ) {
-          answers[
-            questionNumber
-          ] = ""
-
-          emptyCount++
-
-          continue
-        }
+        // -----------------------------------------------
+        // Y
+        // -----------------------------------------------
 
         const centerY =
           (
-            firstYBase +
+            layout.firstY +
             rowIndex *
-              rowStepBase
+              layout.rowStep
           ) *
           scaleY
 
         const values = []
+
+        // -----------------------------------------------
+        // A - E
+        // -----------------------------------------------
 
         for (
           let choiceIndex = 0;
           choiceIndex < 5;
           choiceIndex++
         ) {
-          const centerX =
-            xCentersBase[
+          const baseX =
+            layout.x[
               columnIndex
             ][
               choiceIndex
-            ] *
+            ]
+
+          const centerX =
+            baseX *
             scaleX
 
           const ink =
@@ -1429,6 +1458,10 @@ function Correction() {
             ink
           )
         }
+
+        // -----------------------------------------------
+        // URUTKAN
+        // -----------------------------------------------
 
         const ranked =
           values
@@ -1448,26 +1481,47 @@ function Correction() {
             )
 
         const highest =
-          ranked[0]?.value ||
-          0
+          ranked[0]?.value || 0
 
         const second =
-          ranked[1]?.value ||
-          0
+          ranked[1]?.value || 0
 
-        /*
-         * Bubble kosong pada foto biasanya
-         * sekitar 0.00 - 0.20.
-         *
-         * Bubble dihitamkan biasanya > 0.70.
-         */
+        // -----------------------------------------------
+        // DEBUG
+        // -----------------------------------------------
 
-        const EMPTY_THRESHOLD =
-          0.35
+        debugData.push({
+          nomor:
+            questionNumber,
+
+          A: Number(
+            values[0].toFixed(3)
+          ),
+
+          B: Number(
+            values[1].toFixed(3)
+          ),
+
+          C: Number(
+            values[2].toFixed(3)
+          ),
+
+          D: Number(
+            values[3].toFixed(3)
+          ),
+
+          E: Number(
+            values[4].toFixed(3)
+          ),
+        })
+
+        // -----------------------------------------------
+        // KOSONG
+        // -----------------------------------------------
 
         if (
           highest <
-          EMPTY_THRESHOLD
+          0.12
         ) {
           answers[
             questionNumber
@@ -1475,86 +1529,43 @@ function Correction() {
 
           emptyCount++
 
-          debugData.push({
-            number:
-              questionNumber,
-            A: Number(
-              values[0].toFixed(3)
-            ),
-            B: Number(
-              values[1].toFixed(3)
-            ),
-            C: Number(
-              values[2].toFixed(3)
-            ),
-            D: Number(
-              values[3].toFixed(3)
-            ),
-            E: Number(
-              values[4].toFixed(3)
-            ),
-            answer:
-              "KOSONG",
-          })
-
           continue
         }
 
+        // -----------------------------------------------
+        // GANDA
+        // -----------------------------------------------
+
         /*
-         * GANDA:
-         * pilihan kedua harus sama-sama sangat gelap.
-         *
-         * Kita sengaja membuat threshold tinggi agar
-         * garis lingkaran kosong tidak dianggap ganda.
-         */
+        * Karena bubble kosong memiliki
+        * garis lingkaran, threshold ganda
+        * dibuat cukup tinggi.
+        */
 
         const isDouble =
           second >= 0.65 &&
           second >=
-            highest * 0.80
+            highest * 0.90
 
         if (
           isDouble
         ) {
-          /*
-           * Jangan masukkan sebagai jawaban.
-           * Ini benar-benar ganda.
-           */
           answers[
             questionNumber
           ] = ""
 
           doubleCount++
 
-          debugData.push({
-            number:
-              questionNumber,
-            A: Number(
-              values[0].toFixed(3)
-            ),
-            B: Number(
-              values[1].toFixed(3)
-            ),
-            C: Number(
-              values[2].toFixed(3)
-            ),
-            D: Number(
-              values[3].toFixed(3)
-            ),
-            E: Number(
-              values[4].toFixed(3)
-            ),
-            answer:
-              "GANDA",
-          })
-
           continue
         }
 
+        // -----------------------------------------------
+        // JAWABAN
+        // -----------------------------------------------
+
         const answer =
           choices[
-            ranked[0]
-              .index
+            ranked[0].index
           ]
 
         answers[
@@ -1562,31 +1573,23 @@ function Correction() {
         ] = answer
 
         answeredCount++
-
-        debugData.push({
-          number:
-            questionNumber,
-          A: Number(
-            values[0].toFixed(3)
-          ),
-          B: Number(
-            values[1].toFixed(3)
-          ),
-          C: Number(
-            values[2].toFixed(3)
-          ),
-          D: Number(
-            values[3].toFixed(3)
-          ),
-          E: Number(
-            values[4].toFixed(3)
-          ),
-          answer,
-        })
       }
 
+      // =====================================================
+      // DEBUG CONSOLE
+      // =====================================================
+
       console.log(
-        "========== OMR FIXED LAYOUT =========="
+        "======================================"
+      )
+
+      console.log(
+        `OMR ${totalQuestions} SOAL`
+      )
+
+      console.log(
+        "Layout:",
+        layout
       )
 
       console.table(
@@ -1594,7 +1597,7 @@ function Correction() {
       )
 
       console.log(
-        "Jawaban siswa:",
+        "Jawaban:",
         answers
       )
 
@@ -1604,7 +1607,7 @@ function Correction() {
 
       const debug =
         `📝 OMR Fixed Layout` +
-        ` | Kolom: ${columnCount}` +
+        ` | Kolom: ${layout.columns}` +
         ` | Baca: ${answeredCount}/${totalQuestions}` +
         ` | Kosong: ${emptyCount}` +
         ` | Ganda: ${doubleCount}`
@@ -1630,8 +1633,8 @@ function Correction() {
       }
 
     } finally {
-      if (source)
-        source.delete()
+      if (src)
+        src.delete()
 
       if (gray)
         gray.delete()
