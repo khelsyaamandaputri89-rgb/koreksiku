@@ -102,41 +102,70 @@ function Correction() {
   // HITUNG HASIL
   // =====================================================
 
-  const calculateResult = (studentAnswers, answerKeys) => {
-    let correctCount = 0
-    let wrongCount = 0
-    let emptyCount = 0
+  const calculateResult = (
+    studentAnswers,
+    answerKeys
+  ) => {
+    let correct = 0
+    let wrong = 0
+    let empty = 0
 
-    const totalQuestions = answerKeys.length
+    const details = []
 
-    answerKeys.forEach((keyItem, index) => {
-      const questionNumber = keyItem.question_number || index + 1
-      const key = keyItem.correct_answer // Misal 'A', 'B', dst.
-      const studentAns = studentAnswers[questionNumber] // Berisi 'A', 'B', '-', atau 'GANDA'
+    answerKeys.forEach((key) => {
+      const studentAnswer = String(
+        studentAnswers[
+          key.question_number
+        ] || ""
+      )
+        .trim()
+        .toUpperCase()
 
-      // 1. Cek Jawaban Kosong (Termasuk "-", "", null, atau undefined)
-      if (!studentAns || studentAns === "-" || studentAns.trim() === "") {
-        emptyCount++
+      const correctAnswer = String(
+        key.answer || ""
+      )
+        .trim()
+        .toUpperCase()
+
+      let status = ""
+
+      if (!studentAnswer) {
+        empty++
+        status = "empty"
+      } else if (
+        studentAnswer === correctAnswer
+      ) {
+        correct++
+        status = "correct"
+      } else {
+        wrong++
+        status = "wrong"
       }
-      // 2. Cek Jawaban Benar
-      else if (studentAns === key) {
-        correctCount++
-      }
-      // 3. Sisanya adalah Jawaban Salah atau Ganda
-      else {
-        wrongCount++
-      }
+
+      details.push({
+        number: key.question_number,
+        studentAnswer,
+        correctAnswer,
+        status,
+      })
     })
 
-    // Hitung nilai skala 0 - 100
-    const score = Math.round((correctCount / totalQuestions) * 100)
+    const total = answerKeys.length
+
+    const score =
+      total > 0
+        ? Math.round(
+            (correct / total) * 100
+          )
+        : 0
 
     return {
+      correct,
+      wrong,
+      empty,
+      total,
       score,
-      correctCount,
-      wrongCount,
-      emptyCount,
-      totalQuestions,
+      details,
     }
   }
 
@@ -625,147 +654,139 @@ function Correction() {
   // 840 x 1320 = 4 pixel/mm
   // =====================================================
 
-  const warpAnswerSheet = (canvas, markers = null) => {
-    if (!window.cv || !window.cv.Mat) return null
+  const warpAnswerSheet = (canvas, markers) => {
+    if (!window.cv || !window.cv.Mat) {
+      return null
+    }
 
     const cv = window.cv
+
     let src = null
     let dst = null
-    let gray = null
-    let blurred = null
-    let thresh = null
-    let contours = null
-    let hierarchy = null
     let srcTri = null
     let dstTri = null
     let matrix = null
 
     try {
       src = cv.imread(canvas)
+
+      // Ukuran hasil akhir LJK
+      // F4 = 210mm x 330mm
       const outputWidth = 840
       const outputHeight = 1320
 
-      let srcPoints = []
+      // =================================================
+      // 4 SUDUT KERTAS ASLI
+      // =================================================
 
-      // =====================================================
-      // 1. JIKA MARKERS TIDAK DIBERIKAN / KURANG AKURAT,
-      //    CARI 4 SUDUT KERTAS SECARA OTOMATIS BERDASARKAN KONTUR
-      // =====================================================
-      let foundAutoCorners = false
+      const srcPoints = [
+        markers.topLeft.x,
+        markers.topLeft.y,
 
-      if (!markers || !markers.topLeft) {
-        gray = new cv.Mat()
-        blurred = new cv.Mat()
-        thresh = new cv.Mat()
-        contours = new cv.MatVector()
-        hierarchy = new cv.Mat()
+        markers.topRight.x,
+        markers.topRight.y,
 
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
-        cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0)
-        cv.threshold(blurred, thresh, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
-        cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        markers.bottomRight.x,
+        markers.bottomRight.y,
 
-        let maxArea = 0
-        let bestApprox = null
-
-        for (let i = 0; i < contours.size(); ++i) {
-          let cnt = contours.get(i)
-          let area = cv.contourArea(cnt)
-
-          // Hanya cari kontur kertas yang cukup besar
-          if (area > (src.rows * src.cols * 0.15)) {
-            let peri = cv.arcLength(cnt, true)
-            let approx = new cv.Mat()
-            cv.approxPolyDP(cnt, approx, 0.02 * peri, true)
-
-            if (approx.rows === 4 && area > maxArea) {
-              maxArea = area
-              bestApprox = approx
-            }
-          }
-        }
-
-        if (bestApprox) {
-          // Ambil 4 titik sudut dari kontur
-          const pts = []
-          for (let i = 0; i < 4; i++) {
-            pts.push({ x: bestApprox.data32S[i * 2], y: bestApprox.data32S[i * 2 + 1] })
-          }
-
-          // Urutkan titik: [Top-Left, Top-Right, Bottom-Right, Bottom-Left]
-          pts.sort((a, b) => a.y - b.y)
-          const topRow = pts.slice(0, 2).sort((a, b) => a.x - b.x)
-          const bottomRow = pts.slice(2, 4).sort((a, b) => a.x - b.x)
-
-          srcPoints = [
-            topRow[0].x, topRow[0].y,
-            topRow[1].x, topRow[1].y,
-            bottomRow[1].x, bottomRow[1].y,
-            bottomRow[0].x, bottomRow[0].y
-          ]
-          foundAutoCorners = true
-          bestApprox.delete()
-        }
-      }
-
-      // Jika pencarian otomatis tidak dipakai/gagal, gunakan markers bawaan UI
-      if (!foundAutoCorners) {
-        if (!markers || !markers.topLeft) {
-          console.error("Marker 4 sudut tidak ditemukan!")
-          return null
-        }
-        srcPoints = [
-          markers.topLeft.x, markers.topLeft.y,
-          markers.topRight.x, markers.topRight.y,
-          markers.bottomRight.x, markers.bottomRight.y,
-          markers.bottomLeft.x, markers.bottomLeft.y,
-        ]
-      }
-
-      // =====================================================
-      // 2. TARGET HASIL WARP (840 x 1320)
-      // =====================================================
-      const dstPoints = [
-        0, 0,
-        outputWidth, 0,
-        outputWidth, outputHeight,
-        0, outputHeight,
+        markers.bottomLeft.x,
+        markers.bottomLeft.y,
       ]
 
-      srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, srcPoints)
-      dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, dstPoints)
+      // =================================================
+      // HASIL AKHIR
+      //
+      // Seluruh canvas hanya berisi LJK.
+      // Tidak ada background meja.
+      // =================================================
 
-      matrix = cv.getPerspectiveTransform(srcTri, dstTri)
+      const dstPoints = [
+        0,
+        0,
+
+        outputWidth,
+        0,
+
+        outputWidth,
+        outputHeight,
+
+        0,
+        outputHeight,
+      ]
+
+      srcTri = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        srcPoints
+      )
+
+      dstTri = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        dstPoints
+      )
+
+      // =================================================
+      // PERSPECTIVE TRANSFORM
+      // =================================================
+
+      matrix = cv.getPerspectiveTransform(
+        srcTri,
+        dstTri
+      )
+
       dst = new cv.Mat()
 
       cv.warpPerspective(
         src,
         dst,
         matrix,
-        new cv.Size(outputWidth, outputHeight),
+        new cv.Size(
+          outputWidth,
+          outputHeight
+        ),
         cv.INTER_CUBIC,
         cv.BORDER_CONSTANT,
-        new cv.Scalar(255, 255, 255, 255)
+        new cv.Scalar(
+          255,
+          255,
+          255,
+          255
+        )
       )
 
-      const resultCanvas = document.createElement("canvas")
-      resultCanvas.width = outputWidth
-      resultCanvas.height = outputHeight
+      // =================================================
+      // CANVAS HASIL
+      // HANYA LJK
+      // =================================================
 
-      cv.imshow(resultCanvas, dst)
+      const resultCanvas =
+        document.createElement("canvas")
+
+      resultCanvas.width =
+        outputWidth
+
+      resultCanvas.height =
+        outputHeight
+
+      cv.imshow(
+        resultCanvas,
+        dst
+      )
+
       return resultCanvas
-
     } catch (error) {
-      console.error("ERROR WARP LJK:", error)
+      console.error(
+        "ERROR WARP LJK:",
+        error
+      )
+
       return null
     } finally {
       if (src) src.delete()
       if (dst) dst.delete()
-      if (gray) gray.delete()
-      if (blurred) blurred.delete()
-      if (thresh) thresh.delete()
-      if (contours) contours.delete()
-      if (hierarchy) hierarchy.delete()
       if (srcTri) srcTri.delete()
       if (dstTri) dstTri.delete()
       if (matrix) matrix.delete()
@@ -1231,249 +1252,355 @@ function Correction() {
   // BACA JAWABAN
   // =====================================================
 
-  const readStudentAnswers = (canvas, totalQuestions) => {
-    if (!window.cv || !window.cv.Mat) {
+  const readStudentAnswers = (
+    canvas,
+    totalQuestions
+  ) => {
+    if (
+      !window.cv ||
+      !window.cv.Mat
+    ) {
       return {
         answers: {},
-        stats: { answeredCount: 0, emptyCount: 0, doubleCount: 0 },
-        debug: "❌ OpenCV belum siap.",
+        debug:
+          "❌ OpenCV belum siap.",
       }
     }
 
     const cv = window.cv
 
-    let src = null
+    let source = null
     let gray = null
     let blur = null
-    let circles = null
 
     try {
-      const columnCount = totalQuestions >= 80 ? 3 : 2
-      const questionsPerColumn = Math.ceil(totalQuestions / columnCount)
-      const choices = ["A", "B", "C", "D", "E"]
-      const PX_PER_MM = 4
+      const layout =
+        getSheetLayout(
+          totalQuestions
+        )
 
-      // Dimensi LJK
-      const pageWidthMm = 210
-      const paddingLeftMm = 15
-      const paddingRightMm = 15
-      const contentWidthMm = pageWidthMm - paddingLeftMm - paddingRightMm
-      const columnGapMm = columnCount === 3 ? 5 : 10
-      const columnWidthMm = (contentWidthMm - columnGapMm * (columnCount - 1)) / columnCount
-      const numberWidthMm = columnCount === 3 ? 7 : 9
-      const numberMarginMm = 1.5
-      const choiceWidthMm = columnCount === 3 ? 7.2 : 10
-      const questionRowHeightMm = totalQuestions >= 80 ? 4.8 : totalQuestions >= 60 ? 5 : 5.5
-      const bubbleSizeMm = totalQuestions >= 100 ? 4 : totalQuestions >= 90 ? 4.2 : totalQuestions >= 80 ? 4.3 : totalQuestions >= 70 ? 4.5 : 5
+      const positions =
+        getBubblePositions(
+          totalQuestions
+        )
 
-      src = cv.imread(canvas)
+      console.log(
+        "===== LAYOUT OMR ====="
+      )
+
+      console.log(
+        "Jumlah soal:",
+        totalQuestions
+      )
+
+      console.log(
+        "Kolom:",
+        layout.columnCount
+      )
+
+      console.log(
+        "Soal per kolom:",
+        layout.questionsPerColumn
+      )
+
+      console.log(
+        "Tinggi baris:",
+        layout.rowHeightMm,
+        "mm"
+      )
+
+      source =
+        cv.imread(canvas)
+
       gray = new cv.Mat()
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+
+      cv.cvtColor(
+        source,
+        gray,
+        cv.COLOR_RGBA2GRAY
+      )
 
       blur = new cv.Mat()
-      cv.GaussianBlur(gray, blur, new cv.Size(3, 3), 0)
 
-      // Deteksi Lingkaran awal untuk anchoring Y
-      circles = new cv.Mat()
-      cv.HoughCircles(blur, circles, cv.HOUGH_GRADIENT, 1, 8, 80, 12, 3, 12)
+      cv.GaussianBlur(
+        gray,
+        blur,
+        new cv.Size(3, 3),
+        0
+      )
 
-      const detectedCircles = []
-      for (let i = 0; i < circles.cols; i++) {
-        const x = circles.data32F[i * 3]
-        const y = circles.data32F[i * 3 + 1]
-        const r = circles.data32F[i * 3 + 2]
-
-        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(r)) continue
-        if (r < 3 || r > 12) continue
-        if (y < 280 || y > 1150) continue
-
-        detectedCircles.push({ x, y, r })
-      }
-
-      // Pre-calculate X Centers
-      const bubbleCentersX = []
-      for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
-        const columnStartMm = paddingLeftMm + columnIndex * (columnWidthMm + columnGapMm)
-        const answerStartMm = columnStartMm + numberWidthMm + numberMarginMm
-        const gapMm = columnCount === 3 ? 0.6 : 1
-        const letterWidthMm = columnCount === 3 ? 1.5 : 2
-        const contentInsideMm = bubbleSizeMm + gapMm + letterWidthMm
-        const bubbleOffsetMm = (choiceWidthMm - contentInsideMm) / 2
-        const bubbleCenterOffsetMm = bubbleOffsetMm + bubbleSizeMm / 2
-
-        for (let choiceIndex = 0; choiceIndex < 5; choiceIndex++) {
-          const xMm = answerStartMm + choiceIndex * choiceWidthMm + bubbleCenterOffsetMm
-          bubbleCentersX.push({
-            columnIndex,
-            choiceIndex,
-            x: xMm * PX_PER_MM,
-          })
-        }
-      }
-
-      // Tentukan Posisi Y Baris Pertama secara fleksibel
-      const firstRowCandidates = []
-      for (const expected of bubbleCentersX) {
-        const near = detectedCircles.filter(
-          (circle) => Math.abs(circle.x - expected.x) < 12 && circle.y > 300 && circle.y < 470
-        )
-        if (near.length > 0) {
-          const smallestY = Math.min(...near.map((c) => c.y))
-          firstRowCandidates.push(smallestY)
-        }
-      }
-
-      let firstRowCenterY = 386
-      if (firstRowCandidates.length >= 3) {
-        firstRowCandidates.sort((a, b) => a - b)
-        firstRowCenterY = firstRowCandidates[Math.floor(firstRowCandidates.length / 2)]
-      }
-
-      // Fungsi Pengukuran Tinta menggunakan Adaptive Dynamic Threshold
-      const measureInk = (centerX, centerY) => {
-        const radius = (bubbleSizeMm * PX_PER_MM) / 2
-        const innerRadius = radius * 0.65 // Sedikit diperbesar agar area sampel lebih luas
-
-        const startX = Math.floor(centerX - innerRadius)
-        const endX = Math.ceil(centerX + innerRadius)
-        const startY = Math.floor(centerY - innerRadius)
-        const endY = Math.ceil(centerY + innerRadius)
-
-        let darkPixels = 0
-        let totalPixels = 0
-
-        for (let y = startY; y <= endY; y++) {
-          if (y < 0 || y >= gray.rows) continue
-          for (let x = startX; x <= endX; x++) {
-            if (x < 0 || x >= gray.cols) continue
-
-            const dx = x - centerX
-            const dy = y - centerY
-            if (Math.sqrt(dx * dx + dy * dy) > innerRadius) continue
-
-            const value = gray.ucharPtr(y, x)[0]
-
-            // PERBAIKAN: Threshold disesuaikan (120 cukup akurat memisahkan pensil dari kertas)
-            if (value < 120) {
-              darkPixels++
-            }
-            totalPixels++
-          }
-        }
-
-        return totalPixels === 0 ? 0 : darkPixels / totalPixels
-      }
-
-      // Loop Pengolahan Soal
       const answers = {}
+
       let answeredCount = 0
       let emptyCount = 0
       let doubleCount = 0
 
-      for (let questionIndex = 0; questionIndex < totalQuestions; questionIndex++) {
-        const questionNumber = questionIndex + 1
-        const columnIndex = Math.floor(questionIndex / questionsPerColumn)
-        const rowIndex = questionIndex % questionsPerColumn
+      const debugData = []
 
-        const centerY = firstRowCenterY + rowIndex * questionRowHeightMm * PX_PER_MM
-        const columnBubbles = bubbleCentersX.filter((item) => item.columnIndex === columnIndex)
+      /*
+       * 840 x 1320
+       * 4 pixel = 1mm
+       */
+
+      const pxPerMmX =
+        canvas.width / 210
+
+      const pxPerMmY =
+        canvas.height / 330
+
+      const bubbleRadius =
+        (
+          layout.bubbleSizeMm /
+          2
+        ) *
+        pxPerMmX
+
+      for (
+        const position of positions
+      ) {
+        const centerY =
+          position.y *
+          pxPerMmY
 
         const inkValues = []
-        for (let choiceIndex = 0; choiceIndex < 5; choiceIndex++) {
-          const bubble = columnBubbles.find((item) => item.choiceIndex === choiceIndex)
-          if (!bubble) {
-            inkValues.push(0)
-            continue
+
+        const choices = [
+          "A",
+          "B",
+          "C",
+          "D",
+          "E",
+        ]
+
+        choices.forEach(
+          (choice) => {
+            const centerX =
+              position.choices[
+                choice
+              ] *
+              pxPerMmX
+
+            /*
+             * Bubble ukuran mengikuti
+             * AnswerSheet.jsx.
+             *
+             * Untuk membaca isi,
+             * gunakan radius sekitar 1.45mm.
+             */
+
+            const radius =
+              Math.max(
+                5,
+                (
+                  layout.bubbleSizeMm *
+                  0.29
+                ) *
+                  pxPerMmX
+              )
+
+            const ink =
+              measureBubbleInk(
+                gray,
+                centerX,
+                centerY,
+                radius,
+                bubbleRadius
+              )
+
+            inkValues.push(
+              ink
+            )
           }
-          inkValues.push(measureInk(bubble.x, centerY))
-        }
+        )
 
-        // Urutkan nilai tinta dari terbesar
-        const sorted = inkValues
-          .map((value, index) => ({ value, index }))
-          .sort((a, b) => b.value - a.value)
+        /*
+         * Urutkan tingkat kehitaman
+         */
 
-        const highest = sorted[0]?.value || 0
-        const second = sorted[1]?.value || 0
-        const highestIndex = sorted[0]?.index ?? 0
+        const indexed =
+          inkValues
+            .map(
+              (
+                value,
+                index
+              ) => ({
+                value,
+                index,
+              })
+            )
+            .sort(
+              (a, b) =>
+                b.value -
+                a.value
+            )
 
-        // THRESHOLD LOGIC
-        const MIN_INK = 0.12 // Minimal 12% terisi hitam agar dianggap diarsir
+        const highest =
+          indexed[0]?.value || 0
 
-        if (highest < MIN_INK) {
-          // PERBAIKAN 1: Kosong
-          answers[questionNumber] = "-"
+        const second =
+          indexed[1]?.value || 0
+
+        /*
+         * Threshold kosong.
+         *
+         * Karena border bubble tidak
+         * dibaca, nilai kosong harus
+         * rendah.
+         */
+
+        const EMPTY_THRESHOLD =
+          0.12
+
+        /*
+         * Kalau nilai tertinggi rendah,
+         * berarti kosong.
+         */
+
+        if (
+          highest <
+          EMPTY_THRESHOLD
+        ) {
+          answers[
+            position.questionNumber
+          ] = ""
+
           emptyCount++
-        } else {
-          // PERBAIKAN 2: Deteksi Ganda yang Realistis
-          // Jika bulatan kedua memiliki rasio kegelapan minimal 10% DAN mendekati 60% dari bulatan tertinggi
-          const isDouble = second >= 0.12 && second >= highest * 0.70
 
-          if (isDouble) {
-            answers[questionNumber] = "GANDA"
-            doubleCount++
-          } else {
-            // PERBAIKAN 3: Jawaban Valid (Terbaca)
-            answers[questionNumber] = choices[highestIndex]
-            answeredCount++
-          }
+          debugData.push({
+            number:
+              position.questionNumber,
+            ink:
+              inkValues.map(
+                (value) =>
+                  Number(
+                    value.toFixed(
+                      3
+                    )
+                  )
+              ),
+            answer: "",
+          })
+
+          continue
         }
+
+        /*
+         * Kalau dua pilihan hampir sama
+         * gelap, kemungkinan siswa
+         * menghitamkan dua pilihan.
+         */
+
+        const isDouble =
+          second >
+            EMPTY_THRESHOLD &&
+          second >=
+            highest * 0.94
+
+        if (isDouble) {
+          answers[
+            position.questionNumber
+          ] = ""
+
+          doubleCount++
+
+          debugData.push({
+            number:
+              position.questionNumber,
+            ink:
+              inkValues.map(
+                (value) =>
+                  Number(
+                    value.toFixed(
+                      3
+                    )
+                  )
+              ),
+            answer:
+              "GANDA",
+          })
+
+          continue
+        }
+
+        const answer =
+          choices[
+            indexed[0].index
+          ]
+
+        answers[
+          position.questionNumber
+        ] = answer
+
+        answeredCount++
+
+        debugData.push({
+          number:
+            position.questionNumber,
+          ink:
+            inkValues.map(
+              (value) =>
+                Number(
+                  value.toFixed(
+                    3
+                  )
+                )
+            ),
+          answer,
+        })
       }
 
-      const debug = `📝 OMR Fixed Layout | Kolom: ${columnCount} | Baca: ${answeredCount}/${totalQuestions} | Kosong: ${emptyCount} | Ganda: ${doubleCount}`
+      console.log(
+        "===== HASIL PEMBACAAN ====="
+      )
+
+      console.table(
+        debugData
+      )
+
+      const debug =
+        `📝 OMR Fixed Layout` +
+        ` | Kolom: ${layout.columnCount}` +
+        ` | Baca: ${answeredCount}/${totalQuestions}` +
+        ` | Kosong: ${emptyCount}` +
+        ` | Ganda: ${doubleCount}`
+
+      console.log(
+        "DEBUG:",
+        debug
+      )
+
+      console.log(
+        "JAWABAN:",
+        answers
+      )
 
       return {
         answers,
-        stats: { answeredCount, emptyCount, doubleCount },
         debug,
       }
     } catch (error) {
-      console.error("ERROR READ STUDENT ANSWERS:", error)
+      console.error(
+        "ERROR READ OMR:",
+        error
+      )
+
       return {
         answers: {},
-        stats: { answeredCount: 0, emptyCount: 0, doubleCount: 0 },
-        debug: `❌ Gagal membaca jawaban: ${error?.message || "error tidak diketahui"}`,
+        debug:
+          `❌ Gagal membaca jawaban: ${
+            error?.message ||
+            "error tidak diketahui"
+          }`,
       }
     } finally {
-      if (src) src.delete()
-      if (gray) gray.delete()
-      if (blur) blur.delete()
-      if (circles) circles.delete()
-    }
-  }
+      if (source)
+        source.delete()
 
-  // Fungsi untuk menghitung nilai dan statistik hasil koreksi LJK
-  const evaluateCorrection = (studentAnswers, answerKey, totalQuestions = 100) => {
-    let benar = 0
-    let salah = 0
-    let kosong = 0
+      if (gray)
+        gray.delete()
 
-    for (let i = 1; i <= totalQuestions; i++) {
-      const studentAns = studentAnswers[i] // Berisi 'A', 'B', 'C', 'D', 'E', '-', atau 'GANDA'
-      const key = answerKey[i]
-
-      // 1. Cek Jawaban Kosong (Tangkap string "-", "", null, atau undefined)
-      if (!studentAns || studentAns === "-" || studentAns.trim() === "") {
-        kosong++
-      } 
-      // 2. Cek Jawaban Benar
-      else if (studentAns === key) {
-        benar++
-      } 
-      // 3. Sisanya adalah Jawaban Salah atau GANDA
-      else {
-        salah++
-      }
-    }
-
-    // Hitung Nilai Skala 0 - 100
-    const nilai = Math.round((benar / totalQuestions) * 100)
-
-    return {
-      nilai,
-      benar,   // Misal: 16
-      salah,   // Misal: 32 (hanya dihitung jika siswa mengisi tapi salah/ganda)
-      kosong,  // Misal: 52 (sinkron dengan log header)
+      if (blur)
+        blur.delete()
     }
   }
 
@@ -1885,39 +2012,139 @@ function Correction() {
             </div>
           )}
 
-          {/* Kartu Hasil Koreksi */}
+          {/* HASIL KOREKSI */}
           {correctionResult && (
-            <div className="grid grid-cols-4 gap-4 mt-4">
-              {/* Nilai */}
-              <div className="card-box">
-                <p className="text-gray-400">Nilai</p>
-                <h2 className="text-blue-500 text-3xl font-bold">
-                  {correctionResult.score}
-                </h2>
+            <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-6">
+
+              <h2 className="text-2xl font-bold text-slate-800">
+                🎉 Hasil Koreksi
+              </h2>
+
+              <p className="mt-2 text-gray-500">
+                Nama Siswa:{" "}
+                <span className="font-semibold text-slate-800">
+                  {studentName}
+                </span>
+              </p>
+
+              <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-4">
+
+                <div className="rounded-xl bg-blue-50 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Nilai
+                  </p>
+
+                  <p className="mt-2 text-4xl font-bold text-blue-600">
+                    {correctionResult.score}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-green-50 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Benar
+                  </p>
+
+                  <p className="mt-2 text-4xl font-bold text-green-600">
+                    {correctionResult.correct}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-red-50 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Salah
+                  </p>
+
+                  <p className="mt-2 text-4xl font-bold text-red-600">
+                    {correctionResult.wrong}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-gray-100 p-5 text-center">
+                  <p className="text-sm text-gray-500">
+                    Kosong
+                  </p>
+
+                  <p className="mt-2 text-4xl font-bold text-gray-700">
+                    {correctionResult.empty}
+                  </p>
+                </div>
+
               </div>
 
-              {/* Benar */}
-              <div className="card-box">
-                <p className="text-gray-400">Benar</p>
-                <h2 className="text-green-500 text-3xl font-bold">
-                  {correctionResult.correctCount}
-                </h2>
-              </div>
+              {/* DETAIL */}
+              <div className="mt-6 overflow-x-auto">
 
-              {/* Salah */}
-              <div className="card-box">
-                <p className="text-gray-400">Salah</p>
-                <h2 className="text-red-500 text-3xl font-bold">
-                  {correctionResult.wrongCount}
-                </h2>
-              </div>
+                <table className="w-full border-collapse">
 
-              {/* Kosong - SEKARANG AKAN TERISI (misal: 52) */}
-              <div className="card-box">
-                <p className="text-gray-400">Kosong</p>
-                <h2 className="text-gray-300 text-3xl font-bold">
-                  {correctionResult.emptyCount}
-                </h2>
+                  <thead>
+                    <tr className="border-b bg-gray-50 text-left">
+                      <th className="p-3">
+                        No
+                      </th>
+
+                      <th className="p-3">
+                        Jawaban Siswa
+                      </th>
+
+                      <th className="p-3">
+                        Kunci Jawaban
+                      </th>
+
+                      <th className="p-3">
+                        Hasil
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {correctionResult.details.map(
+                      (item) => (
+                        <tr
+                          key={
+                            item.number
+                          }
+                          className="border-b"
+                        >
+
+                          <td className="p-3">
+                            {
+                              item.number
+                            }
+                          </td>
+
+                          <td className="p-3">
+                            {
+                              item.studentAnswer ||
+                              "-"
+                            }
+                          </td>
+
+                          <td className="p-3">
+                            {
+                              item.correctAnswer
+                            }
+                          </td>
+
+                          <td className="p-3">
+                            {item.status ===
+                              "correct" &&
+                              "✅ Benar"}
+
+                            {item.status ===
+                              "wrong" &&
+                              "❌ Salah"}
+
+                            {item.status ===
+                              "empty" &&
+                              "⬜ Kosong"}
+                          </td>
+
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+
+                </table>
               </div>
             </div>
           )}
