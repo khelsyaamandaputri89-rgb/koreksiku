@@ -654,139 +654,147 @@ function Correction() {
   // 840 x 1320 = 4 pixel/mm
   // =====================================================
 
-  const warpAnswerSheet = (canvas, markers) => {
-    if (!window.cv || !window.cv.Mat) {
-      return null
-    }
+  const warpAnswerSheet = (canvas, markers = null) => {
+    if (!window.cv || !window.cv.Mat) return null
 
     const cv = window.cv
-
     let src = null
     let dst = null
+    let gray = null
+    let blurred = null
+    let thresh = null
+    let contours = null
+    let hierarchy = null
     let srcTri = null
     let dstTri = null
     let matrix = null
 
     try {
       src = cv.imread(canvas)
-
-      // Ukuran hasil akhir LJK
-      // F4 = 210mm x 330mm
       const outputWidth = 840
       const outputHeight = 1320
 
-      // =================================================
-      // 4 SUDUT KERTAS ASLI
-      // =================================================
+      let srcPoints = []
 
-      const srcPoints = [
-        markers.topLeft.x,
-        markers.topLeft.y,
+      // =====================================================
+      // 1. JIKA MARKERS TIDAK DIBERIKAN / KURANG AKURAT,
+      //    CARI 4 SUDUT KERTAS SECARA OTOMATIS BERDASARKAN KONTUR
+      // =====================================================
+      let foundAutoCorners = false
 
-        markers.topRight.x,
-        markers.topRight.y,
+      if (!markers || !markers.topLeft) {
+        gray = new cv.Mat()
+        blurred = new cv.Mat()
+        thresh = new cv.Mat()
+        contours = new cv.MatVector()
+        hierarchy = new cv.Mat()
 
-        markers.bottomRight.x,
-        markers.bottomRight.y,
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+        cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0)
+        cv.threshold(blurred, thresh, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
+        cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
-        markers.bottomLeft.x,
-        markers.bottomLeft.y,
-      ]
+        let maxArea = 0
+        let bestApprox = null
 
-      // =================================================
-      // HASIL AKHIR
-      //
-      // Seluruh canvas hanya berisi LJK.
-      // Tidak ada background meja.
-      // =================================================
+        for (let i = 0; i < contours.size(); ++i) {
+          let cnt = contours.get(i)
+          let area = cv.contourArea(cnt)
 
+          // Hanya cari kontur kertas yang cukup besar
+          if (area > (src.rows * src.cols * 0.15)) {
+            let peri = cv.arcLength(cnt, true)
+            let approx = new cv.Mat()
+            cv.approxPolyDP(cnt, approx, 0.02 * peri, true)
+
+            if (approx.rows === 4 && area > maxArea) {
+              maxArea = area
+              bestApprox = approx
+            }
+          }
+        }
+
+        if (bestApprox) {
+          // Ambil 4 titik sudut dari kontur
+          const pts = []
+          for (let i = 0; i < 4; i++) {
+            pts.push({ x: bestApprox.data32S[i * 2], y: bestApprox.data32S[i * 2 + 1] })
+          }
+
+          // Urutkan titik: [Top-Left, Top-Right, Bottom-Right, Bottom-Left]
+          pts.sort((a, b) => a.y - b.y)
+          const topRow = pts.slice(0, 2).sort((a, b) => a.x - b.x)
+          const bottomRow = pts.slice(2, 4).sort((a, b) => a.x - b.x)
+
+          srcPoints = [
+            topRow[0].x, topRow[0].y,
+            topRow[1].x, topRow[1].y,
+            bottomRow[1].x, bottomRow[1].y,
+            bottomRow[0].x, bottomRow[0].y
+          ]
+          foundAutoCorners = true
+          bestApprox.delete()
+        }
+      }
+
+      // Jika pencarian otomatis tidak dipakai/gagal, gunakan markers bawaan UI
+      if (!foundAutoCorners) {
+        if (!markers || !markers.topLeft) {
+          console.error("Marker 4 sudut tidak ditemukan!")
+          return null
+        }
+        srcPoints = [
+          markers.topLeft.x, markers.topLeft.y,
+          markers.topRight.x, markers.topRight.y,
+          markers.bottomRight.x, markers.bottomRight.y,
+          markers.bottomLeft.x, markers.bottomLeft.y,
+        ]
+      }
+
+      // =====================================================
+      // 2. TARGET HASIL WARP (840 x 1320)
+      // =====================================================
       const dstPoints = [
-        0,
-        0,
-
-        outputWidth,
-        0,
-
-        outputWidth,
-        outputHeight,
-
-        0,
-        outputHeight,
+        0, 0,
+        outputWidth, 0,
+        outputWidth, outputHeight,
+        0, outputHeight,
       ]
 
-      srcTri = cv.matFromArray(
-        4,
-        1,
-        cv.CV_32FC2,
-        srcPoints
-      )
+      srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, srcPoints)
+      dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, dstPoints)
 
-      dstTri = cv.matFromArray(
-        4,
-        1,
-        cv.CV_32FC2,
-        dstPoints
-      )
-
-      // =================================================
-      // PERSPECTIVE TRANSFORM
-      // =================================================
-
-      matrix = cv.getPerspectiveTransform(
-        srcTri,
-        dstTri
-      )
-
+      matrix = cv.getPerspectiveTransform(srcTri, dstTri)
       dst = new cv.Mat()
 
       cv.warpPerspective(
         src,
         dst,
         matrix,
-        new cv.Size(
-          outputWidth,
-          outputHeight
-        ),
+        new cv.Size(outputWidth, outputHeight),
         cv.INTER_CUBIC,
         cv.BORDER_CONSTANT,
-        new cv.Scalar(
-          255,
-          255,
-          255,
-          255
-        )
+        new cv.Scalar(255, 255, 255, 255)
       )
 
-      // =================================================
-      // CANVAS HASIL
-      // HANYA LJK
-      // =================================================
+      const resultCanvas = document.createElement("canvas")
+      resultCanvas.width = outputWidth
+      resultCanvas.height = outputHeight
 
-      const resultCanvas =
-        document.createElement("canvas")
-
-      resultCanvas.width =
-        outputWidth
-
-      resultCanvas.height =
-        outputHeight
-
-      cv.imshow(
-        resultCanvas,
-        dst
-      )
-
+      cv.imshow(resultCanvas, dst)
       return resultCanvas
-    } catch (error) {
-      console.error(
-        "ERROR WARP LJK:",
-        error
-      )
 
+    } catch (error) {
+      console.error("ERROR WARP LJK:", error)
       return null
     } finally {
       if (src) src.delete()
       if (dst) dst.delete()
+      if (gray) gray.delete()
+      if (blurred) blurred.delete()
+      if (thresh) thresh.delete()
+      if (contours) contours.delete()
+      if (hierarchy) hierarchy.delete()
       if (srcTri) srcTri.delete()
       if (dstTri) dstTri.delete()
       if (matrix) matrix.delete()
