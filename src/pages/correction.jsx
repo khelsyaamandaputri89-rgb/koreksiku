@@ -1113,14 +1113,28 @@ function Correction() {
     canvas,
     totalQuestions
   ) => {
-    if (
-      !window.cv ||
-      !window.cv.Mat
-    ) {
+    if (!window.cv || !window.cv.Mat) {
+      return {
+        answers: {},
+        debug: "❌ OpenCV belum siap.",
+      }
+    }
+
+    const supportedTotals = [
+      45,
+      50,
+      60,
+      70,
+      80,
+      90,
+      100,
+    ]
+
+    if (!supportedTotals.includes(Number(totalQuestions))) {
       return {
         answers: {},
         debug:
-          "❌ OpenCV belum siap.",
+          `❌ Jumlah soal ${totalQuestions} belum didukung.`,
       }
     }
 
@@ -1131,11 +1145,9 @@ function Correction() {
     let blur = null
 
     try {
-      source =
-        cv.imread(canvas)
+      source = cv.imread(canvas)
 
-      gray =
-        new cv.Mat()
+      gray = new cv.Mat()
 
       cv.cvtColor(
         source,
@@ -1143,82 +1155,36 @@ function Correction() {
         cv.COLOR_RGBA2GRAY
       )
 
-      blur =
-        new cv.Mat()
+      blur = new cv.Mat()
 
       cv.GaussianBlur(
         gray,
         blur,
-        new cv.Size(
-          3,
-          3
-        ),
+        new cv.Size(3, 3),
         0
       )
 
       /*
        * ===================================================
-       * KOORDINAT LJK ASLI
+       * PENTING
        *
-       * Diperoleh dari layout 100 soal pada LJK kamu
-       * setelah di-warp menjadi 840 x 1320.
+       * Kita TIDAK lagi memakai koordinat bubble manual
+       * seperti firstYBase = 361 / rowStep = 17.3.
        *
-       * Kolom 1 : 1 - 34
-       * Kolom 2 : 35 - 68
-       * Kolom 3 : 69 - 100
+       * Masalah sebelumnya:
+       * 50 soal mempunyai jarak baris berbeda dengan 100 soal.
+       * Kalau rowStep salah, semakin ke bawah semakin meleset.
+       *
+       * Sekarang:
+       * 1. Cari lingkaran bubble yang BENAR-BENAR tercetak.
+       * 2. Kelompokkan menjadi 5 pilihan per kolom.
+       * 3. Kelompokkan Y menjadi baris.
+       * 4. Baru baca tinta di pusat bubble.
+       *
+       * Jadi 45, 50, 60, 70, 80, 90, 100 dapat
+       * mengikuti ukuran cetak sebenarnya.
        * ===================================================
        */
-
-      const scaleX =
-        source.cols / 840
-
-      const scaleY =
-        source.rows / 1320
-
-      const xCentersBase = [
-        [
-          136,
-          161,
-          187,
-          211,
-          239,
-        ],
-        [
-          354,
-          378,
-          403,
-          427,
-          455,
-        ],
-        [
-          568,
-          594,
-          619,
-          646,
-          670,
-        ],
-      ]
-
-      /*
-       * Pusat bubble nomor 1.
-       *
-       * Jarak antar baris:
-       * sekitar 17.3 px
-       */
-
-      const firstYBase =
-        361
-
-      const rowStepBase =
-        17.3
-
-      const choices = [
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-      ]
 
       const columnCount =
         totalQuestions >= 80
@@ -1231,130 +1197,325 @@ function Correction() {
             columnCount
         )
 
-      // =================================================
-      // UKUR TINTA
-      // =================================================
+      const expectedBubbleCount =
+        totalQuestions * 5
 
-      const measureInk = (
-        centerX,
-        centerY
-      ) => {
-        /*
-         * Bubble diameter sekitar 4mm.
-         * Pada 840px / 210mm = 4px/mm,
-         * diameter sekitar 16px.
-         *
-         * Kita hanya membaca lingkaran bagian
-         * DALAM supaya garis bubble tidak dianggap
-         * sebagai arsiran.
-         */
+      // ===================================================
+      // 1. CARI CIRCLE BUBBLE
+      // ===================================================
 
-        const radius =
-          5.2 *
-          (
-            scaleX +
-            scaleY
-          ) /
-          2
+      const rawCircles = []
 
-        const radiusSquared =
-          radius * radius
+      const houghSettings = [
+        {
+          param2: 9,
+          minDist: 7,
+        },
+        {
+          param2: 8,
+          minDist: 6,
+        },
+        {
+          param2: 7,
+          minDist: 6,
+        },
+      ]
 
-        const startX =
-          Math.floor(
-            centerX -
-              radius
+      for (
+        const setting of
+          houghSettings
+      ) {
+        const circles =
+          new cv.Mat()
+
+        try {
+          cv.HoughCircles(
+            blur,
+            circles,
+            cv.HOUGH_GRADIENT,
+            1,
+            setting.minDist,
+            80,
+            setting.param2,
+            3,
+            11
           )
-
-        const endX =
-          Math.ceil(
-            centerX +
-              radius
-          )
-
-        const startY =
-          Math.floor(
-            centerY -
-              radius
-          )
-
-        const endY =
-          Math.ceil(
-            centerY +
-              radius
-          )
-
-        let dark = 0
-        let total = 0
-
-        for (
-          let y = startY;
-          y <= endY;
-          y++
-        ) {
-          if (
-            y < 0 ||
-            y >= gray.rows
-          ) {
-            continue
-          }
 
           for (
-            let x = startX;
-            x <= endX;
-            x++
+            let i = 0;
+            i < circles.cols;
+            i++
           ) {
+            const x =
+              circles.data32F[
+                i * 3
+              ]
+
+            const y =
+              circles.data32F[
+                i * 3 + 1
+              ]
+
+            const radius =
+              circles.data32F[
+                i * 3 + 2
+              ]
+
             if (
-              x < 0 ||
-              x >= gray.cols
+              !Number.isFinite(x) ||
+              !Number.isFinite(y) ||
+              !Number.isFinite(radius)
             ) {
               continue
             }
-
-            const dx =
-              x -
-              centerX
-
-            const dy =
-              y -
-              centerY
-
-            if (
-              dx * dx +
-                dy * dy >
-              radiusSquared
-            ) {
-              continue
-            }
-
-            const value =
-              gray.ucharPtr(
-                y,
-                x
-              )[0]
-
-            total++
 
             /*
-             * Bagian bubble yang benar-benar
-             * dihitamkan jauh lebih gelap.
+             * Area pilihan ganda.
+             *
+             * Hasil warp = 840 x 1320.
+             * Bubble berada kira-kira dari Y 330
+             * sampai sekitar 1050 tergantung jumlah soal.
+             *
+             * Jangan pakai batas 930 seperti versi lama,
+             * karena 70 soal dapat turun lebih bawah.
              */
             if (
-              value < 155
+              x < 50 ||
+              x > source.cols - 50 ||
+              y < 320 ||
+              y > 1100
             ) {
-              dark++
+              continue
             }
+
+            if (
+              radius < 3 ||
+              radius > 11
+            ) {
+              continue
+            }
+
+            rawCircles.push({
+              x,
+              y,
+              radius,
+            })
+          }
+        } finally {
+          circles.delete()
+        }
+      }
+
+      // ===================================================
+      // 2. HILANGKAN CIRCLE DUPLIKAT
+      // ===================================================
+
+      rawCircles.sort(
+        (a, b) =>
+          b.radius - a.radius
+      )
+
+      const circles = []
+
+      for (
+        const circle of
+          rawCircles
+      ) {
+        const duplicate =
+          circles.some(
+            (item) =>
+              Math.hypot(
+                item.x -
+                  circle.x,
+                item.y -
+                  circle.y
+              ) < 5
+          )
+
+        if (!duplicate) {
+          circles.push(circle)
+        }
+      }
+
+      if (
+        circles.length <
+        Math.max(
+          50,
+          expectedBubbleCount *
+            0.20
+        )
+      ) {
+        return {
+          answers: {},
+          debug:
+            `❌ Circle bubble terlalu sedikit (${circles.length}).`,
+        }
+      }
+
+      // ===================================================
+      // 3. CARI POSISI X SEMUA BUBBLE
+      // ===================================================
+
+      /*
+       * Setiap kolom selalu mempunyai 5 bubble:
+       * A B C D E
+       *
+       * 2 kolom  -> 10 posisi X
+       * 3 kolom  -> 15 posisi X
+       */
+
+      const xValues =
+        circles.map(
+          (circle) =>
+            circle.x
+        )
+
+      const xCenters =
+        cluster1D(
+          xValues,
+          columnCount * 5
+        )
+
+      if (
+        xCenters.length !==
+        columnCount * 5
+      ) {
+        return {
+          answers: {},
+          debug:
+            "❌ Gagal mengkalibrasi posisi A-E.",
+        }
+      }
+
+      /*
+       * Pisahkan menjadi:
+       *
+       * [A B C D E] [A B C D E]
+       * atau
+       * [A B C D E] [A B C D E] [A B C D E]
+       */
+
+      const columnXCenters = []
+
+      for (
+        let columnIndex = 0;
+        columnIndex <
+        columnCount;
+        columnIndex++
+      ) {
+        const start =
+          columnIndex * 5
+
+        const group =
+          xCenters.slice(
+            start,
+            start + 5
+          )
+
+        /*
+         * Harus semakin ke kanan.
+         */
+        group.sort(
+          (a, b) => a - b
+        )
+
+        columnXCenters.push(
+          group
+        )
+      }
+
+      // ===================================================
+      // 4. CARI POSISI Y SETIAP BARIS
+      // ===================================================
+
+      /*
+       * Jangan memakai satu rowStep untuk semua jenis LJK.
+       *
+       * 45/50 dapat mempunyai jarak berbeda dengan 60/70.
+       * 80/90/100 juga berbeda.
+       *
+       * Kita ambil Y langsung dari bubble yang terdeteksi.
+       */
+
+      const rowYCenters = []
+
+      for (
+        let columnIndex = 0;
+        columnIndex <
+        columnCount;
+        columnIndex++
+      ) {
+        const xGroup =
+          columnXCenters[
+            columnIndex
+          ]
+
+        const minX =
+          xGroup[0] - 9
+
+        const maxX =
+          xGroup[4] + 9
+
+        const yValues =
+          circles
+            .filter(
+              (circle) =>
+                circle.x >=
+                  minX &&
+                circle.x <=
+                  maxX
+            )
+            .map(
+              (circle) =>
+                circle.y
+            )
+
+        if (
+          yValues.length <
+          questionsPerColumn
+        ) {
+          return {
+            answers: {},
+            debug:
+              `❌ Baris kolom ${columnIndex + 1} tidak terbaca.`,
           }
         }
 
-        return total > 0
-          ? dark / total
-          : 0
+        const centers =
+          cluster1D(
+            yValues,
+            questionsPerColumn
+          )
+
+        if (
+          centers.length !==
+          questionsPerColumn
+        ) {
+          return {
+            answers: {},
+            debug:
+              `❌ Gagal mengkalibrasi baris kolom ${columnIndex + 1}.`,
+          }
+        }
+
+        rowYCenters.push(
+          centers.sort(
+            (a, b) => a - b
+          )
+        )
       }
 
-      // =================================================
-      // BACA SEMUA SOAL
-      // =================================================
+      // ===================================================
+      // 5. BACA TINTA
+      // ===================================================
+
+      const choices = [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+      ]
 
       const answers = {}
 
@@ -1363,6 +1524,150 @@ function Correction() {
       let doubleCount = 0
 
       const debugData = []
+
+      /*
+       * Ukuran area baca dibuat relatif terhadap
+       * jarak antar bubble.
+       *
+       * Ini lebih aman daripada radius 5.2px tetap.
+       */
+
+      const averageXGap =
+        columnXCenters
+          .flatMap(
+            (group) =>
+              group
+                .slice(1)
+                .map(
+                  (x, index) =>
+                    x -
+                    group[index]
+                )
+          )
+          .reduce(
+            (sum, value) =>
+              sum + value,
+            0
+          ) /
+        (
+          columnCount *
+            4
+        )
+
+      const inkRadius =
+        Math.max(
+          4,
+          Math.min(
+            6,
+            averageXGap *
+              0.22
+          )
+        )
+
+      const measureInk =
+        (
+          centerX,
+          centerY
+        ) => {
+          const radius =
+            inkRadius
+
+          const radiusSquared =
+            radius * radius
+
+          const startX =
+            Math.floor(
+              centerX -
+                radius
+            )
+
+          const endX =
+            Math.ceil(
+              centerX +
+                radius
+            )
+
+          const startY =
+            Math.floor(
+              centerY -
+                radius
+            )
+
+          const endY =
+            Math.ceil(
+              centerY +
+                radius
+            )
+
+          let dark = 0
+          let total = 0
+
+          for (
+            let y = startY;
+            y <= endY;
+            y++
+          ) {
+            if (
+              y < 0 ||
+              y >= gray.rows
+            ) {
+              continue
+            }
+
+            for (
+              let x = startX;
+              x <= endX;
+              x++
+            ) {
+              if (
+                x < 0 ||
+                x >= gray.cols
+              ) {
+                continue
+              }
+
+              const dx =
+                x - centerX
+
+              const dy =
+                y - centerY
+
+              if (
+                dx * dx +
+                  dy * dy >
+                radiusSquared
+              ) {
+                continue
+              }
+
+              const value =
+                gray.ucharPtr(
+                  y,
+                  x
+                )[0]
+
+              total++
+
+              /*
+               * Hanya tinta bagian tengah.
+               * Garis lingkaran berada lebih luar.
+               */
+              if (
+                value < 155
+              ) {
+                dark++
+              }
+            }
+          }
+
+          return total
+            ? dark / total
+            : 0
+        }
+
+      // ===================================================
+      // 6. BACA SETIAP SOAL
+      // ===================================================
 
       for (
         let questionIndex = 0;
@@ -1383,26 +1688,15 @@ function Correction() {
           questionIndex %
           questionsPerColumn
 
-        if (
-          columnIndex >=
-          xCentersBase.length
-        ) {
-          answers[
-            questionNumber
-          ] = ""
+        const xGroup =
+          columnXCenters[
+            columnIndex
+          ]
 
-          emptyCount++
-
-          continue
-        }
-
-        const centerY =
-          (
-            firstYBase +
-            rowIndex *
-              rowStepBase
-          ) *
-          scaleY
+        const y =
+          rowYCenters[
+            columnIndex
+          ][rowIndex]
 
         const values = []
 
@@ -1411,22 +1705,16 @@ function Correction() {
           choiceIndex < 5;
           choiceIndex++
         ) {
-          const centerX =
-            xCentersBase[
-              columnIndex
-            ][
+          const x =
+            xGroup[
               choiceIndex
-            ] *
-            scaleX
-
-          const ink =
-            measureInk(
-              centerX,
-              centerY
-            )
+            ]
 
           values.push(
-            ink
+            measureInk(
+              x,
+              y
+            )
           )
         }
 
@@ -1448,22 +1736,24 @@ function Correction() {
             )
 
         const highest =
-          ranked[0]?.value ||
-          0
+          ranked[0]?.value || 0
 
         const second =
-          ranked[1]?.value ||
-          0
+          ranked[1]?.value || 0
 
         /*
-         * Bubble kosong pada foto biasanya
-         * sekitar 0.00 - 0.20.
-         *
-         * Bubble dihitamkan biasanya > 0.70.
+         * Karena pusat bubble kosong hampir putih,
+         * sedangkan bubble hitam memiliki tinta kuat.
          */
-
         const EMPTY_THRESHOLD =
-          0.35
+          0.30
+
+        /*
+         * Ganda hanya jika dua bubble memang
+         * sama-sama gelap.
+         */
+        const DOUBLE_THRESHOLD =
+          0.55
 
         if (
           highest <
@@ -1478,21 +1768,7 @@ function Correction() {
           debugData.push({
             number:
               questionNumber,
-            A: Number(
-              values[0].toFixed(3)
-            ),
-            B: Number(
-              values[1].toFixed(3)
-            ),
-            C: Number(
-              values[2].toFixed(3)
-            ),
-            D: Number(
-              values[3].toFixed(3)
-            ),
-            E: Number(
-              values[4].toFixed(3)
-            ),
+            values,
             answer:
               "KOSONG",
           })
@@ -1500,26 +1776,15 @@ function Correction() {
           continue
         }
 
-        /*
-         * GANDA:
-         * pilihan kedua harus sama-sama sangat gelap.
-         *
-         * Kita sengaja membuat threshold tinggi agar
-         * garis lingkaran kosong tidak dianggap ganda.
-         */
-
         const isDouble =
-          second >= 0.65 &&
+          second >=
+            DOUBLE_THRESHOLD &&
           second >=
             highest * 0.80
 
         if (
           isDouble
         ) {
-          /*
-           * Jangan masukkan sebagai jawaban.
-           * Ini benar-benar ganda.
-           */
           answers[
             questionNumber
           ] = ""
@@ -1529,21 +1794,7 @@ function Correction() {
           debugData.push({
             number:
               questionNumber,
-            A: Number(
-              values[0].toFixed(3)
-            ),
-            B: Number(
-              values[1].toFixed(3)
-            ),
-            C: Number(
-              values[2].toFixed(3)
-            ),
-            D: Number(
-              values[3].toFixed(3)
-            ),
-            E: Number(
-              values[4].toFixed(3)
-            ),
+            values,
             answer:
               "GANDA",
           })
@@ -1566,27 +1817,23 @@ function Correction() {
         debugData.push({
           number:
             questionNumber,
-          A: Number(
-            values[0].toFixed(3)
-          ),
-          B: Number(
-            values[1].toFixed(3)
-          ),
-          C: Number(
-            values[2].toFixed(3)
-          ),
-          D: Number(
-            values[3].toFixed(3)
-          ),
-          E: Number(
-            values[4].toFixed(3)
-          ),
+          values,
           answer,
         })
       }
 
       console.log(
-        "========== OMR FIXED LAYOUT =========="
+        "========== OMR AUTO CALIBRATED =========="
+      )
+
+      console.log(
+        "X Centers:",
+        columnXCenters
+      )
+
+      console.log(
+        "Y Centers:",
+        rowYCenters
       )
 
       console.table(
@@ -1599,11 +1846,11 @@ function Correction() {
       )
 
       console.log(
-        "======================================"
+        "=========================================="
       )
 
       const debug =
-        `📝 OMR Fixed Layout` +
+        `📝 OMR Auto-Calibrated` +
         ` | Kolom: ${columnCount}` +
         ` | Baca: ${answeredCount}/${totalQuestions}` +
         ` | Kosong: ${emptyCount}` +
@@ -1613,7 +1860,6 @@ function Correction() {
         answers,
         debug,
       }
-
     } catch (error) {
       console.error(
         "ERROR READ OMR:",
@@ -1628,7 +1874,6 @@ function Correction() {
             "error tidak diketahui"
           }`,
       }
-
     } finally {
       if (source)
         source.delete()
