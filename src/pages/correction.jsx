@@ -102,70 +102,41 @@ function Correction() {
   // HITUNG HASIL
   // =====================================================
 
-  const calculateResult = (
-    studentAnswers,
-    answerKeys
-  ) => {
-    let correct = 0
-    let wrong = 0
-    let empty = 0
+  const calculateResult = (studentAnswers, answerKeys) => {
+    let correctCount = 0
+    let wrongCount = 0
+    let emptyCount = 0
 
-    const details = []
+    const totalQuestions = answerKeys.length
 
-    answerKeys.forEach((key) => {
-      const studentAnswer = String(
-        studentAnswers[
-          key.question_number
-        ] || ""
-      )
-        .trim()
-        .toUpperCase()
+    answerKeys.forEach((keyItem, index) => {
+      const questionNumber = keyItem.question_number || index + 1
+      const key = keyItem.correct_answer // Misal 'A', 'B', dst.
+      const studentAns = studentAnswers[questionNumber] // Berisi 'A', 'B', '-', atau 'GANDA'
 
-      const correctAnswer = String(
-        key.answer || ""
-      )
-        .trim()
-        .toUpperCase()
-
-      let status = ""
-
-      if (!studentAnswer) {
-        empty++
-        status = "empty"
-      } else if (
-        studentAnswer === correctAnswer
-      ) {
-        correct++
-        status = "correct"
-      } else {
-        wrong++
-        status = "wrong"
+      // 1. Cek Jawaban Kosong (Termasuk "-", "", null, atau undefined)
+      if (!studentAns || studentAns === "-" || studentAns.trim() === "") {
+        emptyCount++
       }
-
-      details.push({
-        number: key.question_number,
-        studentAnswer,
-        correctAnswer,
-        status,
-      })
+      // 2. Cek Jawaban Benar
+      else if (studentAns === key) {
+        correctCount++
+      }
+      // 3. Sisanya adalah Jawaban Salah atau Ganda
+      else {
+        wrongCount++
+      }
     })
 
-    const total = answerKeys.length
-
-    const score =
-      total > 0
-        ? Math.round(
-            (correct / total) * 100
-          )
-        : 0
+    // Hitung nilai skala 0 - 100
+    const score = Math.round((correctCount / totalQuestions) * 100)
 
     return {
-      correct,
-      wrong,
-      empty,
-      total,
       score,
-      details,
+      correctCount,
+      wrongCount,
+      emptyCount,
+      totalQuestions,
     }
   }
 
@@ -1436,7 +1407,7 @@ function Correction() {
         } else {
           // PERBAIKAN 2: Deteksi Ganda yang Realistis
           // Jika bulatan kedua memiliki rasio kegelapan minimal 10% DAN mendekati 60% dari bulatan tertinggi
-          const isDouble = second >= 0.10 && second >= highest * 0.60
+          const isDouble = second >= 0.12 && second >= highest * 0.70
 
           if (isDouble) {
             answers[questionNumber] = "GANDA"
@@ -1468,6 +1439,41 @@ function Correction() {
       if (gray) gray.delete()
       if (blur) blur.delete()
       if (circles) circles.delete()
+    }
+  }
+
+  // Fungsi untuk menghitung nilai dan statistik hasil koreksi LJK
+  const evaluateCorrection = (studentAnswers, answerKey, totalQuestions = 100) => {
+    let benar = 0
+    let salah = 0
+    let kosong = 0
+
+    for (let i = 1; i <= totalQuestions; i++) {
+      const studentAns = studentAnswers[i] // Berisi 'A', 'B', 'C', 'D', 'E', '-', atau 'GANDA'
+      const key = answerKey[i]
+
+      // 1. Cek Jawaban Kosong (Tangkap string "-", "", null, atau undefined)
+      if (!studentAns || studentAns === "-" || studentAns.trim() === "") {
+        kosong++
+      } 
+      // 2. Cek Jawaban Benar
+      else if (studentAns === key) {
+        benar++
+      } 
+      // 3. Sisanya adalah Jawaban Salah atau GANDA
+      else {
+        salah++
+      }
+    }
+
+    // Hitung Nilai Skala 0 - 100
+    const nilai = Math.round((benar / totalQuestions) * 100)
+
+    return {
+      nilai,
+      benar,   // Misal: 16
+      salah,   // Misal: 32 (hanya dihitung jika siswa mengisi tapi salah/ganda)
+      kosong,  // Misal: 52 (sinkron dengan log header)
     }
   }
 
@@ -1879,139 +1885,39 @@ function Correction() {
             </div>
           )}
 
-          {/* HASIL KOREKSI */}
+          {/* Kartu Hasil Koreksi */}
           {correctionResult && (
-            <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-6">
-
-              <h2 className="text-2xl font-bold text-slate-800">
-                🎉 Hasil Koreksi
-              </h2>
-
-              <p className="mt-2 text-gray-500">
-                Nama Siswa:{" "}
-                <span className="font-semibold text-slate-800">
-                  {studentName}
-                </span>
-              </p>
-
-              <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-4">
-
-                <div className="rounded-xl bg-blue-50 p-5 text-center">
-                  <p className="text-sm text-gray-500">
-                    Nilai
-                  </p>
-
-                  <p className="mt-2 text-4xl font-bold text-blue-600">
-                    {correctionResult.score}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-green-50 p-5 text-center">
-                  <p className="text-sm text-gray-500">
-                    Benar
-                  </p>
-
-                  <p className="mt-2 text-4xl font-bold text-green-600">
-                    {correctionResult.correct}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-red-50 p-5 text-center">
-                  <p className="text-sm text-gray-500">
-                    Salah
-                  </p>
-
-                  <p className="mt-2 text-4xl font-bold text-red-600">
-                    {correctionResult.wrong}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-gray-100 p-5 text-center">
-                  <p className="text-sm text-gray-500">
-                    Kosong
-                  </p>
-
-                  <p className="mt-2 text-4xl font-bold text-gray-700">
-                    {correctionResult.empty}
-                  </p>
-                </div>
-
+            <div className="grid grid-cols-4 gap-4 mt-4">
+              {/* Nilai */}
+              <div className="card-box">
+                <p className="text-gray-400">Nilai</p>
+                <h2 className="text-blue-500 text-3xl font-bold">
+                  {correctionResult.score}
+                </h2>
               </div>
 
-              {/* DETAIL */}
-              <div className="mt-6 overflow-x-auto">
+              {/* Benar */}
+              <div className="card-box">
+                <p className="text-gray-400">Benar</p>
+                <h2 className="text-green-500 text-3xl font-bold">
+                  {correctionResult.correctCount}
+                </h2>
+              </div>
 
-                <table className="w-full border-collapse">
+              {/* Salah */}
+              <div className="card-box">
+                <p className="text-gray-400">Salah</p>
+                <h2 className="text-red-500 text-3xl font-bold">
+                  {correctionResult.wrongCount}
+                </h2>
+              </div>
 
-                  <thead>
-                    <tr className="border-b bg-gray-50 text-left">
-                      <th className="p-3">
-                        No
-                      </th>
-
-                      <th className="p-3">
-                        Jawaban Siswa
-                      </th>
-
-                      <th className="p-3">
-                        Kunci Jawaban
-                      </th>
-
-                      <th className="p-3">
-                        Hasil
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {correctionResult.details.map(
-                      (item) => (
-                        <tr
-                          key={
-                            item.number
-                          }
-                          className="border-b"
-                        >
-
-                          <td className="p-3">
-                            {
-                              item.number
-                            }
-                          </td>
-
-                          <td className="p-3">
-                            {
-                              item.studentAnswer ||
-                              "-"
-                            }
-                          </td>
-
-                          <td className="p-3">
-                            {
-                              item.correctAnswer
-                            }
-                          </td>
-
-                          <td className="p-3">
-                            {item.status ===
-                              "correct" &&
-                              "✅ Benar"}
-
-                            {item.status ===
-                              "wrong" &&
-                              "❌ Salah"}
-
-                            {item.status ===
-                              "empty" &&
-                              "⬜ Kosong"}
-                          </td>
-
-                        </tr>
-                      )
-                    )}
-                  </tbody>
-
-                </table>
+              {/* Kosong - SEKARANG AKAN TERISI (misal: 52) */}
+              <div className="card-box">
+                <p className="text-gray-400">Kosong</p>
+                <h2 className="text-gray-300 text-3xl font-bold">
+                  {correctionResult.emptyCount}
+                </h2>
               </div>
             </div>
           )}
