@@ -1250,6 +1250,9 @@ function Correction() {
         bubbleSizeMm / 2
 
       // Buat koordinat A-E untuk setiap kolom.
+
+      const choices = ["A", "B", "C", "D", "E"]
+      
       const xCentersBase = Array.from(
         { length: columnCount },
         (_, columnIndex) => {
