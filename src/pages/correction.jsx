@@ -412,6 +412,118 @@ function Correction() {
     }
   }
 
+    // =====================================================
+  // CADANGAN: DETEKSI TEPI KERTAS PUTIH
+  // Dipakai kalau 4 marker hitam tidak ditemukan.
+  // =====================================================
+
+  const detectPaper = (canvas) => {
+    const cv = window.cv
+    if (!cv || !cv.Mat) return { detected: false, message: "OpenCV belum siap." }
+
+    let src = null, gray = null, blur = null, bin = null
+    let kernel = null, contours = null, hierarchy = null
+    let hull = null, approx = null
+
+    try {
+      src = cv.imread(canvas)
+      gray = new cv.Mat()
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+
+      blur = new cv.Mat()
+      cv.GaussianBlur(gray, blur, new cv.Size(7, 7), 0)
+
+      // kertas putih vs meja gelap
+      bin = new cv.Mat()
+      cv.threshold(blur, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
+
+      // tutup lubang akibat teks/bubble di kertas
+      kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(25, 25))
+      cv.morphologyEx(bin, bin, cv.MORPH_CLOSE, kernel)
+
+      contours = new cv.MatVector()
+      hierarchy = new cv.Mat()
+      cv.findContours(bin, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+
+      const imageArea = src.cols * src.rows
+      let bestIdx = -1
+      let bestArea = 0
+
+      for (let i = 0; i < contours.size(); i++) {
+        const c = contours.get(i)
+        const a = cv.contourArea(c)
+        c.delete()
+        if (a > bestArea) {
+          bestArea = a
+          bestIdx = i
+        }
+      }
+
+      if (bestIdx < 0 || bestArea < imageArea * 0.15) {
+        return {
+          detected: false,
+          message: "❌ Kertas LJK tidak terdeteksi. Pastikan seluruh kertas terlihat dan latar berbeda warna dengan kertas.",
+        }
+      }
+
+      const contour = contours.get(bestIdx)
+      hull = new cv.Mat()
+      cv.convexHull(contour, hull, false, true)
+      contour.delete()
+
+      const peri = cv.arcLength(hull, true)
+      let points = null
+
+      for (const eps of [0.02, 0.03, 0.04, 0.06, 0.08, 0.1]) {
+        approx = new cv.Mat()
+        cv.approxPolyDP(hull, approx, eps * peri, true)
+
+        if (approx.rows === 4) {
+          points = []
+          for (let j = 0; j < 4; j++) {
+            points.push({ x: approx.data32S[j * 2], y: approx.data32S[j * 2 + 1] })
+          }
+          approx.delete()
+          approx = null
+          break
+        }
+        approx.delete()
+        approx = null
+      }
+
+      if (!points) {
+        return { detected: false, message: "❌ Bentuk kertas tidak terbaca sebagai 4 sudut." }
+      }
+
+      const o = orderCorners(points)
+      if (!o) return { detected: false, message: "❌ Sudut kertas tidak valid." }
+
+      const wTop = Math.hypot(o.topRight.x - o.topLeft.x, o.topRight.y - o.topLeft.y)
+      const hLeft = Math.hypot(o.bottomLeft.x - o.topLeft.x, o.bottomLeft.y - o.topLeft.y)
+      const ratio = wTop / hLeft
+
+      // F4 = 0.636, toleransi untuk kamera miring
+      if (ratio < 0.45 || ratio > 0.85) {
+        return { detected: false, message: "❌ Bentuk kertas tidak sesuai F4 (rasio " + ratio.toFixed(2) + ")." }
+      }
+
+      return { detected: true, message: "✅ Kertas ditemukan (tanpa marker).", corners: o }
+    } catch (error) {
+      console.error("ERROR DETEKSI KERTAS:", error)
+      return { detected: false, message: `❌ ${error?.message || "error"}` }
+    } finally {
+      if (src) src.delete()
+      if (gray) gray.delete()
+      if (blur) blur.delete()
+      if (bin) bin.delete()
+      if (kernel) kernel.delete()
+      if (contours) contours.delete()
+      if (hierarchy) hierarchy.delete()
+      if (hull) hull.delete()
+      if (approx) approx.delete()
+    }
+  }
+
   // =====================================================
   // WARP: pusat 4 marker -> koordinat aslinya di LJK.
   // Hasil selalu 1050 x 1650 px (5 px/mm), jadi
@@ -438,10 +550,14 @@ function Correction() {
         m.bottomLeft.x, m.bottomLeft.y,
       ])
 
-      const left = MARKER_CENTER * PX
-      const right = (PAPER_W - MARKER_CENTER) * PX
-      const top = MARKER_CENTER * PX
-      const bottom = (PAPER_H - MARKER_CENTER) * PX
+      // mode "markers": titik = pusat marker (11mm dari tepi)
+      // mode "paper"  : titik = sudut kertas (0mm dari tepi)
+      const inset = mode === "markers" ? MARKER_CENTER : 0
+
+      const left = inset * PX
+      const right = (PAPER_W - inset) * PX
+      const top = inset * PX
+      const bottom = (PAPER_H - inset) * PX
 
       dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
         left, top,
@@ -513,7 +629,7 @@ function Correction() {
     }
 
     let best = { dx: 0, dy: 0, score: -Infinity }
-    const range = 2
+    const range = 4
     const step = 0.25
 
     for (let dy = -range; dy <= range + 1e-9; dy += step) {
@@ -775,34 +891,38 @@ function Correction() {
       const context = canvas.getContext("2d", { willReadFrequently: true })
       context.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-      // ---- DETEKSI MARKER ----
-      setMessage("Mencari marker LJK...")
+            // ---- DETEKSI: marker dulu, kalau gagal pakai tepi kertas ----
+      setMessage("Mencari LJK...")
+
+      let mode = "markers"
+      let corners = null
 
       const detection = detectMarkers(canvas)
 
-      if (!detection.detected) {
-        // tampilkan kandidat marker agar mudah di-debug
-        const dbg = document.createElement("canvas")
-        dbg.width = canvas.width
-        dbg.height = canvas.height
-        const dctx = dbg.getContext("2d")
-        dctx.drawImage(canvas, 0, 0)
-        dctx.strokeStyle = "#facc15"
-        dctx.lineWidth = 4
-        ;(detection.candidates || []).forEach((c) => {
-          dctx.strokeRect(c.x - c.size, c.y - c.size, c.size * 2, c.size * 2)
-        })
+      if (detection.detected) {
+        corners = detection.markers
+      } else {
+        const paper = detectPaper(canvas)
 
-        setMessage(detection.message)
-        setPreview(dbg.toDataURL("image/jpeg", 0.85))
-        setScanning(false)
-        return
+        if (paper.detected) {
+          mode = "paper"
+          corners = paper.corners
+        } else {
+          setMessage(paper.message + "\n(Marker hitam juga tidak ditemukan.)")
+          setPreview(canvas.toDataURL("image/jpeg", 0.85))
+          setScanning(false)
+          return
+        }
       }
 
       // ---- WARP ----
-      setMessage("Meluruskan LJK...")
+      setMessage(
+        mode === "markers"
+          ? "Meluruskan LJK (marker)..."
+          : "Meluruskan LJK (tepi kertas)..."
+      )
 
-      const corrected = warpAnswerSheet(canvas, detection.markers)
+      const corrected = warpAnswerSheet(canvas, corners, mode)
 
       if (!corrected) {
         setMessage("❌ Gagal meluruskan LJK.")
