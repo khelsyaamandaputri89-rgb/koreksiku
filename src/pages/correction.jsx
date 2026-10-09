@@ -1175,119 +1175,61 @@ function Correction() {
       const scaleY =
         source.rows / 1320
 
-       const columnCount =
-        totalQuestions >= 80 ? 3 : 2
+      const xCentersBase = [
+        [
+          136,
+          161,
+          187,
+          211,
+          239,
+        ],
+        [
+          354,
+          378,
+          403,
+          427,
+          455,
+        ],
+        [
+          568,
+          594,
+          619,
+          646,
+          670,
+        ],
+      ]
+
+      /*
+       * Pusat bubble nomor 1.
+       *
+       * Jarak antar baris:
+       * sekitar 17.3 px
+       */
+
+      const firstYBase =
+        361
+
+      const rowStepBase =
+        17.3
+
+      const choices = [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+      ]
+
+      const columnCount =
+        totalQuestions >= 80
+          ? 3
+          : 2
 
       const questionsPerColumn =
-        Math.ceil(totalQuestions / columnCount)
-
-      // Jarak antarbaris sesuai jenis LJK.
-      const rowHeightMm =
-        totalQuestions >= 80
-          ? 4.8
-          : totalQuestions >= 60
-          ? 5
-          : 5.5
-
-      // Posisi awal baris soal pada layout cetak.
-      const questionStartYmm =
-        totalQuestions >= 80
-          ? 87
-          : totalQuestions >= 70
-          ? 88
-          : totalQuestions >= 60
-          ? 89
-          : 90
-
-      // Ukuran bubble mengikuti template.
-      const bubbleSizeMm =
-        totalQuestions >= 100
-          ? 4
-          : totalQuestions >= 90
-          ? 4.2
-          : totalQuestions >= 80
-          ? 4.3
-          : totalQuestions >= 70
-          ? 4.5
-          : 5
-
-      // Geometri kolom pada layout cetak.
-      const contentLeft = 15
-      const contentWidth = 180
-
-      const columnGap =
-        columnCount === 3 ? 5 : 10
-
-      const columnWidth =
-        (
-          contentWidth -
-          columnGap * (columnCount - 1)
-        ) / columnCount
-
-      const numberWidth =
-        columnCount === 3 ? 7 : 9
-
-      const numberMargin = 1.5
-
-      const choiceSlotWidth =
-        columnCount === 3 ? 7.2 : 10
-
-      const letterWidth =
-        columnCount === 3 ? 1.8 : 2
-
-      const letterGap =
-        columnCount === 3 ? 0.6 : 1
-
-      const bubbleCenterOffset =
-        (
-          choiceSlotWidth -
-          (
-            bubbleSizeMm +
-            letterGap +
-            letterWidth
-          )
-        ) / 2 +
-        bubbleSizeMm / 2
-
-      // Buat koordinat A-E untuk setiap kolom.
-
-      const choices = ["A", "B", "C", "D", "E"]
-      
-      const xCentersBase = Array.from(
-        { length: columnCount },
-        (_, columnIndex) => {
-          const columnStart =
-            contentLeft +
-            columnIndex *
-              (columnWidth + columnGap)
-
-          const firstChoiceStart =
-            columnStart +
-            numberWidth +
-            numberMargin
-
-          return Array.from(
-            { length: 5 },
-            (_, choiceIndex) =>
-              (
-                firstChoiceStart +
-                choiceIndex * choiceSlotWidth +
-                bubbleCenterOffset
-              ) * 4
-          )
-        }
-      )
-
-      // Titik tengah bubble nomor 1.
-      const firstYBase =
-        (
-          questionStartYmm +
-          rowHeightMm / 2
-        ) * 4
-
-      // Jarak vertikal antarbaris dalam pixel.
-      const rowStepBase =
-        rowHeightMm * 4
+        Math.ceil(
+          totalQuestions /
+            columnCount
+        )
 
       // =================================================
       // UKUR TINTA
