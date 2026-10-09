@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { getLJKLayout } from "../utils/ljkLayout"
 
 function AnswerSheet() {
   const [template, setTemplate] = useState("45-5")
@@ -38,98 +39,14 @@ function AnswerSheet() {
   // 80–100 = 3 kolom
   // =====================================================
 
-  const columnCount =
-    multipleChoiceCount >= 80
-      ? 3
-      : 2
+  const layout = getLJKLayout(multipleChoiceCount, essayCount)
 
-  // =====================================================
-  // BAGI SOAL KE KOLOM
-  // =====================================================
-
-  const questionsPerColumn = Math.ceil(
-    multipleChoiceCount / columnCount
+  const columns = Array.from({ length: layout.columnCount }, (_, index) =>
+    multipleChoiceQuestions.slice(
+      index * layout.questionsPerColumn,
+      (index + 1) * layout.questionsPerColumn
+    )
   )
-
-  const columns = Array.from(
-    {
-      length: columnCount,
-    },
-    (_, index) =>
-      multipleChoiceQuestions.slice(
-        index * questionsPerColumn,
-        (index + 1) * questionsPerColumn
-      )
-  )
-
-  // =====================================================
-  // UKURAN BARIS PG
-  // SEMAKIN BANYAK SOAL -> SEMAKIN RAPAT
-  // =====================================================
-
-  const questionRowHeight =
-    multipleChoiceCount >= 100
-      ? "4.8mm"
-      : multipleChoiceCount >= 90
-      ? "4.8mm"
-      : multipleChoiceCount >= 80
-      ? "4.8mm"
-      : multipleChoiceCount >= 70
-      ? "5mm"
-      : multipleChoiceCount >= 60
-      ? "5mm"
-      : "5.5mm"
-
-  // =====================================================
-  // UKURAN BUBBLE
-  // =====================================================
-
-  const bubbleSize =
-    multipleChoiceCount >= 100
-      ? "4mm"
-      : multipleChoiceCount >= 90
-      ? "4.2mm"
-      : multipleChoiceCount >= 80
-      ? "4.3mm"
-      : multipleChoiceCount >= 70
-      ? "4.5mm"
-      : "5mm"
-
-  // =====================================================
-  // JUMLAH GARIS ESSAY
-  // =====================================================
-
-  const essayLineCount =
-    multipleChoiceCount <= 45
-      ? 22
-      : multipleChoiceCount <= 50
-      ? 19
-      : multipleChoiceCount <= 60
-      ? 15
-      : multipleChoiceCount <= 70
-      ? 11
-      : multipleChoiceCount <= 80
-      ? 8
-      : multipleChoiceCount <= 90
-      ? 6
-      : 5
-
-  // =====================================================
-  // TINGGI GARIS ESSAY
-  // =====================================================
-
-  const essayLineHeight =
-    multipleChoiceCount <= 50
-      ? "6mm"
-      : multipleChoiceCount <= 60
-      ? "5mm"
-      : multipleChoiceCount <= 70
-      ? "5mm"
-      : multipleChoiceCount <= 80
-      ? "4.5mm"
-      : multipleChoiceCount <= 90
-      ? "4mm"
-      : "3.8mm"
 
   // =====================================================
   // CETAK F4
@@ -718,212 +635,131 @@ function AnswerSheet() {
 
         </div>
 
-        {/* =================================================
+        {/* ================= PILIHAN GANDA (POSISI TETAP) ================= */}
+        
+        <div
+          style={{
+            position: "absolute",
+            left: `${layout.marginX}mm`,
+            top: `${layout.mcqTop}mm`,
+            width: `${layout.contentWidth}mm`,
+          }}
+        >
+          <div
+            style={{
+              height: `${layout.titleHeight}mm`,
+              boxSizing: "border-box",
+              borderBottom: "1px solid #000000",
+              fontSize: "9px",
+              fontWeight: "700",
+              display: "flex",
+              alignItems: "flex-end",
+              paddingBottom: "1mm",
+            }}
+          >
             PILIHAN GANDA
-        ================================================== */}
+          </div>
 
-        <div
-          style={{
-            marginTop: "4mm",
-            marginBottom: "2mm",
-            paddingBottom: "1mm",
-            borderBottom:
-              "1px solid #000000",
-            fontSize: "9px",
-            fontWeight: "700",
-          }}
-        >
-          PILIHAN GANDA
-        </div>
-
-        {/* =================================================
-            KOLOM OTOMATIS
-        ================================================== */}
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              `repeat(${columnCount}, 1fr)`,
-            columnGap:
-              columnCount === 3
-                ? "5mm"
-                : "10mm",
-            width: "100%",
-          }}
-        >
-
-          {columns.map(
-            (column, columnIndex) => (
-              <div
-                key={columnIndex}
-              >
-
-                {column.map(
-                  (number) => (
-                    <div
-                      key={number}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${layout.columnCount}, ${layout.colWidth}mm)`,
+              columnGap: `${layout.columnGap}mm`,
+            }}
+          >
+            {columns.map((column, columnIndex) => (
+              <div key={columnIndex}>
+                {column.map((number) => (
+                  <div
+                    key={number}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      height: `${layout.rowHeight}mm`,
+                      fontSize: `${layout.fontPx}px`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <span
                       style={{
-                        display:
-                          "flex",
-                        alignItems:
-                          "center",
-                        height:
-                          questionRowHeight,
-                        fontSize:
-                          columnCount === 3
-                            ? "6px"
-                            : "7px",
-                        whiteSpace:
-                          "nowrap",
+                        width: `${layout.numberWidth}mm`,
+                        marginRight: `${layout.numberMargin}mm`,
+                        textAlign: "right",
+                        fontWeight: "700",
+                        flexShrink: 0,
                       }}
                     >
+                      {number}.
+                    </span>
 
-                      {/* NOMOR */}
-
-                      <span
+                    {["A", "B", "C", "D", "E"].map((choice) => (
+                      <div
+                        key={choice}
                         style={{
-                          width:
-                            columnCount === 3
-                              ? "7mm"
-                              : "9mm",
-
-                          textAlign:
-                            "right",
-
-                          marginRight:
-                            "1.5mm",
-
-                          fontWeight:
-                            "700",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-start",
+                          gap: `${layout.choiceGap}mm`,
+                          width: `${layout.choiceWidth}mm`,
+                          flexShrink: 0,
                         }}
                       >
-                        {number}.
-                      </span>
-
-                      {/* A-E */}
-
-                      {[
-                        "A",
-                        "B",
-                        "C",
-                        "D",
-                        "E",
-                      ].map(
-                        (choice) => (
-                          <div
-                            key={choice}
-                            style={{
-                              display:
-                                "flex",
-                              alignItems:
-                                "center",
-                              justifyContent:
-                                "center",
-                              gap:
-                                columnCount ===
-                                3
-                                  ? "0.6mm"
-                                  : "1mm",
-                              width:
-                                columnCount ===
-                                3
-                                  ? "7.2mm"
-                                  : "10mm",
-                            }}
-                          >
-
-                            <div
-                              style={{
-                                width:
-                                  bubbleSize,
-                                height:
-                                  bubbleSize,
-                                border:
-                                  "1.2px solid #000000",
-                                borderRadius:
-                                  "50%",
-                                flexShrink:
-                                  0,
-                              }}
-                            />
-
-                            <span>
-                              {choice}
-                            </span>
-
-                          </div>
-                        )
-                      )}
-
-                    </div>
-                  )
-                )}
-
+                        <div
+                          style={{
+                            width: `${layout.bubbleSize}mm`,
+                            height: `${layout.bubbleSize}mm`,
+                            boxSizing: "border-box",
+                            border: "1.2px solid #000000",
+                            borderRadius: "50%",
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span>{choice}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
               </div>
-            )
-          )}
-
+            ))}
+          </div>
         </div>
 
-        {/* =================================================
-            ESSAY
-        ================================================== */}
-
+        {/* ================= ESSAY ================= */}
         {essayCount > 0 && (
           <div
             style={{
-              marginTop: "4mm",
+              position: "absolute",
+              left: `${layout.marginX}mm`,
+              top: `${layout.essayTop}mm`,
+              width: `${layout.contentWidth}mm`,
             }}
           >
-
-            {/* JUDUL ESSAY */}
-
             <div
               style={{
-                marginBottom:
-                  "1.5mm",
-                paddingBottom:
-                  "1.5mm",
-                borderBottom:
-                  "1px solid #000000",
+                height: `${layout.essayTitleHeight}mm`,
+                boxSizing: "border-box",
+                borderBottom: "1px solid #000000",
                 fontSize: "9px",
                 fontWeight: "700",
+                display: "flex",
+                alignItems: "flex-end",
+                paddingBottom: "1mm",
               }}
             >
               ESSAY
             </div>
 
-            {/* GARIS ESSAY */}
-
-            <div
-              style={{
-                width: "100%",
-              }}
-            >
-
-              {Array.from({
-                length:
-                  essayLineCount,
-              }).map(
-                (_, index) => (
-                  <div
-                    key={index}
-                    style={{
-                      width: "100%",
-                      height:
-                        essayLineHeight,
-                      borderBottom:
-                        "1px solid #000000",
-                      boxSizing:
-                        "border-box",
-                    }}
-                  />
-                )
-              )}
-
-            </div>
-
+            {Array.from({ length: layout.essayLineCount }).map((_, index) => (
+              <div
+                key={index}
+                style={{
+                  width: "100%",
+                  height: `${layout.essayLineHeight}mm`,
+                  borderBottom: "1px solid #000000",
+                  boxSizing: "border-box",
+                }}
+              />
+            ))}
           </div>
         )}
 
