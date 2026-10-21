@@ -26,6 +26,40 @@ const median = (arr) => {
   return s[Math.floor(s.length / 2)]
 }
 
+
+const waitForOpenCV = (timeout = 20000) => {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+
+    const check = () => {
+      if (
+        window.cvReady &&
+        window.cv &&
+        window.cv.Mat &&
+        window.cv.getPerspectiveTransform &&
+        window.cv.warpPerspective
+      ) {
+        resolve(window.cv);
+        return;
+      }
+
+      if (Date.now() - started >= timeout) {
+        reject(
+          new Error(
+            "OpenCV belum siap. Periksa koneksi internet, lalu muat ulang halaman."
+          )
+        );
+        return;
+      }
+
+      window.setTimeout(check, 100);
+    };
+
+    check();
+  });
+};
+
+
 function Correction() {
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -530,45 +564,75 @@ function Correction() {
   // 1 mm di LJK = 5 px, tidak peduli kertas miring.
   // =====================================================
 
-  const warpAnswerSheet = (canvas, m) => {
-    const cv = window.cv
-    if (!cv || !cv.Mat) return null
 
-    let src = null
-    let dst = null
-    let srcPts = null
-    let dstPts = null
-    let matrix = null
+  const warpAnswerSheet = (canvas, m, mode) => {
+    const cv = window.cv;
+
+    if (!cv || !cv.Mat || !m || !mode) {
+      console.error("OpenCV, titik LJK, atau mode belum tersedia.");
+      return null;
+    }
+
+    let src = null;
+    let dst = null;
+    let srcPts = null;
+    let dstPts = null;
+    let matrix = null;
 
     try {
-      src = cv.imread(canvas)
+      src = cv.imread(canvas);
 
-      srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        m.topLeft.x, m.topLeft.y,
-        m.topRight.x, m.topRight.y,
-        m.bottomRight.x, m.bottomRight.y,
-        m.bottomLeft.x, m.bottomLeft.y,
-      ])
+      const points = [
+        m.topLeft,
+        m.topRight,
+        m.bottomRight,
+        m.bottomLeft,
+      ];
 
-      // mode "markers": titik = pusat marker (11mm dari tepi)
-      // mode "paper"  : titik = sudut kertas (0mm dari tepi)
-      const inset = mode === "markers" ? MARKER_CENTER : 0
+      if (points.some((p) =>
+        !p ||
+        !Number.isFinite(p.x) ||
+        !Number.isFinite(p.y)
+      )) {
+        throw new Error("Koordinat sudut LJK tidak valid.");
+      }
 
-      const left = inset * PX
-      const right = (PAPER_W - inset) * PX
-      const top = inset * PX
-      const bottom = (PAPER_H - inset) * PX
+      srcPts = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        points.flatMap((p) => [p.x, p.y])
+      );
 
-      dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        left, top,
-        right, top,
-        right, bottom,
-        left, bottom,
-      ])
+      // Marker terletak 11 mm dari tepi kertas.
+      // Jika memakai sudut kertas, inset = 0.
+      const inset = mode === "markers" ? MARKER_CENTER : 0;
 
-      matrix = cv.getPerspectiveTransform(srcPts, dstPts)
+      const left = inset * PX;
+      const right = (PAPER_W - inset) * PX;
+      const top = inset * PX;
+      const bottom = (PAPER_H - inset) * PX;
 
-      dst = new cv.Mat()
+      dstPts = cv.matFromArray(
+        4,
+        1,
+        cv.CV_32FC2,
+        [
+          left, top,
+          right, top,
+          right, bottom,
+          left, bottom,
+        ]
+      );
+
+      matrix = cv.getPerspectiveTransform(srcPts, dstPts);
+
+      if (!matrix || matrix.empty()) {
+        throw new Error("Transformasi perspektif gagal dibuat.");
+      }
+
+      dst = new cv.Mat();
+
       cv.warpPerspective(
         src,
         dst,
@@ -577,25 +641,27 @@ function Correction() {
         cv.INTER_LINEAR,
         cv.BORDER_CONSTANT,
         new cv.Scalar(255, 255, 255, 255)
-      )
+      );
 
-      const out = document.createElement("canvas")
-      out.width = OUT_W
-      out.height = OUT_H
-      cv.imshow(out, dst)
+      const output = document.createElement("canvas");
+      output.width = OUT_W;
+      output.height = OUT_H;
 
-      return out
+      cv.imshow(output, dst);
+
+      return output;
     } catch (error) {
-      console.error("ERROR WARP LJK:", error)
-      return null
+      console.error("ERROR WARP LJK:", error);
+      throw error;
     } finally {
-      if (src) src.delete()
-      if (dst) dst.delete()
-      if (srcPts) srcPts.delete()
-      if (dstPts) dstPts.delete()
-      if (matrix) matrix.delete()
+      if (src) src.delete();
+      if (dst) dst.delete();
+      if (srcPts) srcPts.delete();
+      if (dstPts) dstPts.delete();
+      if (matrix) matrix.delete();
     }
-  }
+  };
+
 
   // =====================================================
   // KALIBRASI POSISI PER KOLOM
@@ -868,6 +934,9 @@ function Correction() {
     setCorrectionResult(null)
 
     try {
+      setMessage("Menyiapkan OpenCV...");
+
+      await waitForOpenCV();
       const answerKeys = await getAnswerKey()
 
       if (answerKeys.length === 0) {
